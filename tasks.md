@@ -140,6 +140,7 @@ Atualizado: 2026-07-19
 - [x] Rotas Teams/Exchange usam `processMessageBatch` / `upsertGroupedTrace`
 - [x] Approve gera ticket com contexto agrupado completo
 - [x] Smoke unitário: `scripts/smoke-trace-grouping.mjs` (2 msgs → 1 cluster)
+- [x] Smoke remoto: `scripts/remote-smoke-grouping-inject.mjs` (2 msgs → 1 PENDING com contexto concatenado)
 
 ### 7.2 Triagem IA
 - [x] `analyzeIncomingMessage` com `isContinuation` + contexto de pendência existente
