@@ -81,8 +81,10 @@ Atualizado: 2026-07-19
 - [x] Tag `v1.0.2` + push
 - [x] Bump minor `1.1.0` — agrupamento Teams + IA auditoria
 - [x] Tag `v1.1.0` + push
-- [ ] Bump minor `1.2.0` — auth client EmployeeHub/Portal
-- [ ] Tag `v1.2.0` + push
+- [x] Bump minor `1.2.0` — auth client EmployeeHub/Portal
+- [x] Tag `v1.2.0` + push
+- [x] Patch `1.2.1` — aba Cliente/Operador no login (`area`)
+- [x] Tag `v1.2.1` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -175,11 +177,11 @@ Atualizado: 2026-07-19
 - [x] Login: ADMIN/AGENT local; client via Portal
 - [x] Soft-SSO `POST /api/auth/sso` (cookie `abzToken` ou Bearer)
 - [x] Upsert `SupportUser` EMPLOYEE ao logar pelo Portal
-- [x] UI login: hint Portal + auto-check sessão/SSO
+- [x] UI login: hint Portal + auto-check sessão/SSO + abas Cliente/Operador
 - [x] `.env.example` + README (sem secrets)
-- [x] Smoke `scripts/smoke-portal-auth.mjs`
-- [ ] Deploy server: `JWT_SECRET` alinhado ao Portal + build + pm2
-- [ ] Validar login client com usuário real do Portal
+- [x] Smoke `scripts/smoke-portal-auth.mjs` + `remote-smoke-portal-login.mjs`
+- [x] Deploy server: `JWT_SECRET` alinhado ao Portal + build + pm2
+- [x] Validar login client com usuário real do Portal (`area=client`)
 
 ---
 

@@ -16,6 +16,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [area, setArea] = useState<'client' | 'admin'>('client');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingSso, setCheckingSso] = useState(true);
@@ -69,7 +70,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, area }),
       });
 
       const data = await res.json();
@@ -106,8 +107,7 @@ export default function LoginPage() {
             Plataforma Inteligente de Chamados e Auditoria
           </p>
           <p className="mt-3 text-xs text-slate-500 max-w-sm">
-            Área do cliente: use as mesmas credenciais do Portal (EmployeeHub).
-            Operadores usam as credenciais administrativas locais.
+            Cliente: credenciais do Portal (EmployeeHub). Operador: credenciais locais do Ticket-Manager.
           </p>
         </div>
 
@@ -123,6 +123,31 @@ export default function LoginPage() {
             </div>
           ) : (
           <form onSubmit={handleLogin} className="space-y-6">
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-slate-950/70 border border-white/5">
+              <button
+                type="button"
+                onClick={() => setArea('client')}
+                className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                  area === 'client'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Cliente (Portal)
+              </button>
+              <button
+                type="button"
+                onClick={() => setArea('admin')}
+                className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                  area === 'admin'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Operador
+              </button>
+            </div>
+
             {error && (
               <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 flex items-start gap-2.5 text-red-200 text-sm animate-shake">
                 <ShieldAlert className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />

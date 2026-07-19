@@ -56,16 +56,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (resolved.employee.role === 'ADMIN' || resolved.employee.role === 'AGENT') {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Conta de operador detectada. Faça login administrativo no Ticket-Manager.',
-        },
-        { status: 403 }
-      );
-    }
-
+    // Soft-SSO always opens the client area (EMPLOYEE cookie), even if the
+    // SupportUser row is also an operator account for the same email.
     const sessionData = {
       id: resolved.employee.id,
       name: resolved.employee.name,

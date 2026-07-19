@@ -2,7 +2,7 @@
 
 Sistema de gestão de tickets de suporte que coleta mensagens de **Microsoft Exchange (e-mail)** e **Microsoft Teams** via Microsoft Graph, tria com IA e organiza o fluxo de aprovação/atendimento.
 
-**Versão:** 1.2.0  
+**Versão:** 1.2.1  
 **Autor:** Caio Correia  
 **Licença:** Proprietária — ver [LICENSE](./LICENSE)
 
@@ -69,14 +69,15 @@ Configurações adicionais ficam em **SystemConfig** (banco / Admin UI), não ne
 
 | Área | Fonte de credenciais |
 |------|----------------------|
-| **Admin / Agent** | Tabela `ticket_support.SupportUser` (hash SHA-256 local) |
-| **Client (funcionário)** | Mesmas credenciais do Portal / EmployeeHub (`public.users_unified`, bcrypt) |
+| **Operador (Admin / Agent)** | Tabela `ticket_support.SupportUser` (hash SHA-256 local) — use a aba **Operador** |
+| **Cliente** | Mesmas credenciais do Portal / EmployeeHub (`public.users_unified`, bcrypt) — aba **Cliente (Portal)** |
 
 Fluxo do client:
 
-1. Login em `/` com e-mail/senha do Portal → TM valida bcrypt em `users_unified` → upsert de `SupportUser` role `EMPLOYEE` → cookie de sessão JWT (`session`).
+1. Em `/`, escolha **Cliente (Portal)** e entre com e-mail/senha do Portal → TM valida bcrypt em `users_unified` → upsert/vínculo em `SupportUser` → cookie de sessão JWT (`session`) com role `EMPLOYEE`.
 2. Soft-SSO: se o browser já tiver o cookie JWT do Portal (`abzToken`) e `JWT_SECRET` for o mesmo, `POST /api/auth/sso` cria a sessão do client sem pedir senha de novo (só funciona se o cookie for visível no host do TM — mesmo site/domínio pai).
 3. Logout limpa o cookie `session` do TM (não encerra a sessão do Portal em outro domínio).
+4. API: `POST /api/auth/login` aceita `area: "client" | "admin" | "auto"`.
 
 Smoke local: `node scripts/smoke-portal-auth.mjs` (opcional: `PORTAL_TEST_EMAIL` + `PORTAL_TEST_PASSWORD`).
 

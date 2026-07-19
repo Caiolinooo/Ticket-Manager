@@ -11,9 +11,105 @@ function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password).digest('hex');
 }
 
+type LoginArea = 'client' | 'admin' | 'auto';
+
+function normalizeArea(raw: unknown): LoginArea {
+  if (raw === 'client' || raw === 'admin' || raw === 'auto') return raw;
+  return 'auto';
+}
+
+async function loginLocalOperator(normalizedEmail: string, password: string) {
+  const localUser = await prisma.supportUser.findFirst({
+    where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+  });
+
+  if (!localUser || (localUser.role !== 'ADMIN' && localUser.role !== 'AGENT')) {
+    return {
+      ok: false as const,
+      status: 401,
+      error: 'Credenciais de operador inválidas',
+    };
+  }
+
+  const passwordHash = hashPassword(password);
+  if (localUser.passwordHash !== passwordHash) {
+    return {
+      ok: false as const,
+      status: 401,
+      error: 'Credenciais inválidas',
+    };
+  }
+
+  const sessionData = {
+    id: localUser.id,
+    name: localUser.name,
+    email: localUser.email,
+    role: localUser.role,
+    authSource: 'local' as const,
+  };
+
+  await setSessionCookie(sessionData);
+
+  try {
+    await prisma.auditLog.create({
+      data: {
+        userId: localUser.id,
+        action: 'LOGIN',
+        details: `Usuário ${localUser.name} logou no sistema (local/operador).`,
+      },
+    });
+  } catch (auditError) {
+    console.error('Login audit log error (non-critical):', auditError);
+  }
+
+  return { ok: true as const, sessionData };
+}
+
+async function loginPortalClient(normalizedEmail: string, password: string) {
+  const portal = await authenticatePortalUser(normalizedEmail, password);
+  if (!portal.ok) {
+    return {
+      ok: false as const,
+      status: portal.status,
+      error: portal.error,
+    };
+  }
+
+  const employee = await ensureEmployeeFromPortal(portal.user);
+
+  // Always a client session. If the same email is also a local ADMIN/AGENT,
+  // operators must use area=admin; here we only expose the client role in the cookie.
+  const sessionData = {
+    id: employee.id,
+    name: employee.name || portal.displayName,
+    email: employee.email,
+    role: 'EMPLOYEE' as const,
+    authSource: 'portal' as const,
+    portalUserId: portal.user.id,
+  };
+
+  await setSessionCookie(sessionData);
+
+  try {
+    await prisma.auditLog.create({
+      data: {
+        userId: employee.id,
+        action: 'LOGIN',
+        details: `Usuário ${sessionData.name} logou via Portal (EmployeeHub / client).`,
+      },
+    });
+  } catch (auditError) {
+    console.error('Login audit log error (non-critical):', auditError);
+  }
+
+  return { ok: true as const, sessionData };
+}
+
 export async function POST(request: Request) {
   try {
-    const { email, password } = await request.json();
+    const body = await request.json();
+    const { email, password } = body;
+    const area = normalizeArea(body.area);
 
     if (!email || !password) {
       return NextResponse.json(
@@ -23,100 +119,54 @@ export async function POST(request: Request) {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+
+    if (area === 'client') {
+      const result = await loginPortalClient(normalizedEmail, password);
+      if (!result.ok) {
+        return NextResponse.json(
+          { success: false, error: result.error },
+          { status: result.status }
+        );
+      }
+      return NextResponse.json({ success: true, user: result.sessionData });
+    }
+
+    if (area === 'admin') {
+      const result = await loginLocalOperator(normalizedEmail, password);
+      if (!result.ok) {
+        return NextResponse.json(
+          { success: false, error: result.error },
+          { status: result.status }
+        );
+      }
+      return NextResponse.json({ success: true, user: result.sessionData });
+    }
+
+    // auto: operators first when local ADMIN/AGENT exists, else Portal client
     const localUser = await prisma.supportUser.findFirst({
       where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
     });
 
-    // Admin / Agent: local Ticket-Manager credentials only
     if (localUser && (localUser.role === 'ADMIN' || localUser.role === 'AGENT')) {
-      const passwordHash = hashPassword(password);
-      if (localUser.passwordHash !== passwordHash) {
-        return NextResponse.json(
-          { success: false, error: 'Credenciais inválidas' },
-          { status: 401 }
-        );
+      const result = await loginLocalOperator(normalizedEmail, password);
+      if (result.ok) {
+        return NextResponse.json({ success: true, user: result.sessionData });
       }
-
-      const sessionData = {
-        id: localUser.id,
-        name: localUser.name,
-        email: localUser.email,
-        role: localUser.role,
-        authSource: 'local' as const,
-      };
-
-      await setSessionCookie(sessionData);
-
-      try {
-        await prisma.auditLog.create({
-          data: {
-            userId: localUser.id,
-            action: 'LOGIN',
-            details: `Usuário ${localUser.name} logou no sistema (local).`,
-          },
-        });
-      } catch (auditError) {
-        console.error('Login audit log error (non-critical):', auditError);
-      }
-
-      return NextResponse.json({ success: true, user: sessionData });
-    }
-
-    // Client / Employee: EmployeeHub / Portal credentials (public.users_unified)
-    const portal = await authenticatePortalUser(normalizedEmail, password);
-    if (!portal.ok) {
+      // Wrong local password — do not silently fall through to Portal for operators
       return NextResponse.json(
-        { success: false, error: portal.error },
-        { status: portal.status }
+        { success: false, error: result.error },
+        { status: result.status }
       );
     }
 
-    if (localUser && (localUser.role === 'ADMIN' || localUser.role === 'AGENT')) {
+    const portalResult = await loginPortalClient(normalizedEmail, password);
+    if (!portalResult.ok) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Esta conta é de operador. Use as credenciais administrativas do Ticket-Manager.',
-        },
-        { status: 403 }
+        { success: false, error: portalResult.error },
+        { status: portalResult.status }
       );
     }
-
-    const employee = await ensureEmployeeFromPortal(portal.user);
-
-    if (employee.role === 'ADMIN' || employee.role === 'AGENT') {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Esta conta é de operador. Use as credenciais administrativas do Ticket-Manager.',
-        },
-        { status: 403 }
-      );
-    }
-
-    const sessionData = {
-      id: employee.id,
-      name: employee.name,
-      email: employee.email,
-      role: 'EMPLOYEE',
-      authSource: 'portal' as const,
-      portalUserId: portal.user.id,
-    };
-
-    await setSessionCookie(sessionData);
-
-    try {
-      await prisma.auditLog.create({
-        data: {
-          userId: employee.id,
-          action: 'LOGIN',
-          details: `Usuário ${employee.name} logou via Portal (EmployeeHub).`,
-        },
-      });
-    } catch (auditError) {
-      console.error('Login audit log error (non-critical):', auditError);
-    }
-
-    return NextResponse.json({ success: true, user: sessionData });
+    return NextResponse.json({ success: true, user: portalResult.sessionData });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Erro interno';
     console.error('Login API error:', error);
