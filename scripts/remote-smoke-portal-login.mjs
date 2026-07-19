@@ -8,8 +8,9 @@ import 'dotenv/config';
 const base = process.env.SMOKE_BASE || 'http://127.0.0.1:9120';
 const email = process.env.PORTAL_TEST_EMAIL?.trim();
 const password = process.env.PORTAL_TEST_PASSWORD;
-const adminEmail = process.env.ADMIN_TEST_EMAIL || 'admin@example.com';
-const adminPassword = process.env.ADMIN_TEST_PASSWORD || 'Caio@2122@';
+  // Prefer an explicit admin test account; otherwise try the same email as operator.
+  const adminEmail = process.env.ADMIN_TEST_EMAIL || email;
+  const adminPassword = process.env.ADMIN_TEST_PASSWORD || password;
 
 function parseSetCookie(res) {
   const raw = typeof res.headers.getSetCookie === 'function'
