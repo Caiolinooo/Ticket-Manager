@@ -9,6 +9,26 @@ Atualizado: 2026-07-19
 
 ---
 
+## 0. Hotfix — Ticket.resolution (produção)
+
+### Causa
+- Schema Prisma já tinha `Ticket.resolution String?`, mas o PostgreSQL (`ticket_support."Ticket"`) não tinha a coluna.
+- `POST /api/integrations/approve` chama `prisma.ticket.create()` → Prisma Client exige a coluna → erro em produção.
+
+### Fix
+- [x] Confirmar campo no `prisma/schema.prisma`
+- [x] SQL: `ALTER TABLE "ticket_support"."Ticket" ADD COLUMN IF NOT EXISTS "resolution" TEXT`
+- [x] Migration no repo: `prisma/migrations/20260719_add_ticket_resolution/migration.sql`
+- [x] Script auxiliar: `scripts/add-ticket-resolution-column.mjs` (aplica + valida via information_schema)
+- [x] Coluna aplicada no DB (Supabase compartilhado local/server)
+- [x] Bump `1.0.2` + tag `v1.0.2` + deploy
+
+### Evidência esperada
+- `information_schema`: `resolution` = `text`, `is_nullable` = `YES`
+- Approve não deve mais falhar com "column Ticket.resolution does not exist"
+
+---
+
 ## 1. Coleta Microsoft Graph (Email + Teams)
 
 ### 1.1 Credenciais e token
@@ -57,6 +77,8 @@ Atualizado: 2026-07-19
 - [x] Repo remoto GitHub **privado** + push branch + tag
 - [x] Bump patch `1.0.1` + limpeza de branding organizacional
 - [x] Tag `v1.0.1` + push
+- [x] Bump patch `1.0.2` + fix coluna `Ticket.resolution`
+- [x] Tag `v1.0.2` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -79,10 +101,12 @@ Atualizado: 2026-07-19
 - [x] `npm run build`
 - [x] `pm2 restart ticket-manager`
 - [x] Redeploy pós-limpeza de branding (v1.0.1)
+- [x] Redeploy pós-fix `Ticket.resolution` (v1.0.2)
 
 ### 4.2 Smoke
 - [x] App respondendo na porta **9120** (`/` e `/admin` → HTTP 200)
 - [x] PM2 `ticket-manager` online
+- [x] Coluna `Ticket.resolution` presente no DB (approve desbloqueado)
 - [ ] (Opcional) Smoke sync Teams/Exchange pós-deploy e checar logs AI
 
 ---
