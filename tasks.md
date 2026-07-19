@@ -76,7 +76,8 @@ Atualizado: 2026-07-19
 - [x] `pm2 restart ticket-manager`
 
 ### 4.2 Smoke
-- [x] App respondendo na porta **9120**
+- [x] App respondendo na porta **9120** (`/` e `/admin` → HTTP 200)
+- [x] PM2 `ticket-manager` online com `ticket-manager@1.0.0`
 - [ ] (Opcional) Smoke sync Teams/Exchange pós-deploy e checar logs AI
 
 ---
