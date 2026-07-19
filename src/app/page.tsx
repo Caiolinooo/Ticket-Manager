@@ -24,9 +24,15 @@ export default function LoginPage() {
   useEffect(() => {
     let cancelled = false;
 
+    function hasPortalCookie(): boolean {
+      // Soft-SSO only when EmployeeHub left a JWT cookie (default abzToken).
+      const name = process.env.NEXT_PUBLIC_PORTAL_JWT_COOKIE?.trim() || 'abzToken';
+      return document.cookie.split(';').some((part) => part.trim().startsWith(`${name}=`));
+    }
+
     async function tryExistingSession() {
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
         if (meRes.ok) {
           const meData = await meRes.json();
           if (!cancelled && meData.user?.role) {
@@ -35,10 +41,17 @@ export default function LoginPage() {
           }
         }
 
-        const ssoRes = await fetch('/api/auth/sso', { method: 'POST' });
+        if (!hasPortalCookie()) {
+          return;
+        }
+
+        const ssoRes = await fetch('/api/auth/sso', {
+          method: 'POST',
+          credentials: 'include',
+        });
         if (ssoRes.ok) {
           const ssoData = await ssoRes.json();
-          if (!cancelled && ssoData.user?.role) {
+          if (!cancelled && ssoData.success && ssoData.user?.role) {
             redirectForRole(ssoData.user.role, router);
             return;
           }
@@ -70,6 +83,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password, area }),
       });
 
@@ -79,9 +93,18 @@ export default function LoginPage() {
         throw new Error(data.error || 'Erro ao realizar login');
       }
 
+      if (!data.user?.role) {
+        throw new Error('Login sem papel de usuário — tente novamente.');
+      }
+
       redirectForRole(data.user.role, router);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Falha na conexão com o servidor.';
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Falha na conexão com o servidor.';
       setError(message);
     } finally {
       setLoading(false);
@@ -165,6 +188,8 @@ export default function LoginPage() {
                 </div>
                 <input
                   type="email"
+                  name="username"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 bg-slate-950/60 border border-white/5 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
@@ -186,6 +211,8 @@ export default function LoginPage() {
                 </div>
                 <input
                   type="password"
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 bg-slate-950/60 border border-white/5 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"

@@ -32,6 +32,38 @@ export function getSessionSecret(): string {
   return secret;
 }
 
+/**
+ * Secure cookies only when the app is actually served over HTTPS.
+ * Do NOT tie this to NODE_ENV=production — HTTP VMs (e.g. :9120) otherwise
+ * get Set-Cookie; Secure which browsers refuse to store, breaking login.
+ */
+export function shouldUseSecureCookies(): boolean {
+  const flag = process.env.TM_COOKIE_SECURE?.trim().toLowerCase();
+  if (flag === 'true' || flag === '1' || flag === 'yes') return true;
+  if (flag === 'false' || flag === '0' || flag === 'no') return false;
+
+  const publicUrl = (
+    process.env.TM_PUBLIC_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    ''
+  ).trim();
+  if (publicUrl.startsWith('https://')) return true;
+  if (publicUrl.startsWith('http://')) return false;
+
+  return false;
+}
+
+function sessionCookieOptions(maxAgeSec: number) {
+  return {
+    httpOnly: true,
+    secure: shouldUseSecureCookies(),
+    sameSite: 'lax' as const,
+    maxAge: maxAgeSec,
+    path: '/',
+  };
+}
+
 export function signSession(user: SessionUser, maxAgeSec = DEFAULT_MAX_AGE_SEC): string {
   return jwt.sign(
     {
@@ -106,18 +138,15 @@ export async function setSessionCookie(
 ): Promise<void> {
   const token = signSession(user, maxAgeSec);
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: maxAgeSec,
-    path: '/',
-  });
+  cookieStore.set(SESSION_COOKIE, token, sessionCookieOptions(maxAgeSec));
 }
 
 export async function clearSessionCookie(): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.delete(SESSION_COOKIE);
+  cookieStore.set(SESSION_COOKIE, '', {
+    ...sessionCookieOptions(0),
+    maxAge: 0,
+  });
 }
 
 export function getPortalCookieName(): string {

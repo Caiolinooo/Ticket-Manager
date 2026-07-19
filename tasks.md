@@ -9,6 +9,28 @@ Atualizado: 2026-07-19
 
 ---
 
+## 0b. Hotfix — login loop (cookie Secure em HTTP) — v1.2.2
+
+### Causa
+- `setSessionCookie` usava `secure: NODE_ENV === 'production'`.
+- `next start` força `NODE_ENV=production`, então Set-Cookie vinha com `Secure`.
+- App serve em `http://…:9120` (sem HTTPS) → browser **não grava** o cookie `session`.
+- Login API 200 + redirect → `/me` 401 → volta ao login (loop Cliente e Operador).
+- Soft-SSO sem `abzToken` respondia 401 e poluía o console.
+
+### Fix
+- [x] `shouldUseSecureCookies()` — Secure só com HTTPS / `TM_COOKIE_SECURE=true`
+- [x] SSO sem token → `200 { skipped: true }` (não 401)
+- [x] Login UI: SSO só se houver cookie portal; `credentials: 'include'`; autocomplete
+- [x] Smoke `scripts/smoke-auth-cookie.mjs`
+- [x] Bump `1.2.2` + tag + deploy
+
+### Evidência
+- curl login: Set-Cookie **sem** `Secure` em HTTP
+- `/api/auth/me` com cookie → 200
+
+---
+
 ## 0. Hotfix — Ticket.resolution (produção)
 
 ### Causa
@@ -85,6 +107,8 @@ Atualizado: 2026-07-19
 - [x] Tag `v1.2.0` + push
 - [x] Patch `1.2.1` — aba Cliente/Operador no login (`area`)
 - [x] Tag `v1.2.1` + push
+- [x] Patch `1.2.2` — cookie session sem Secure em HTTP (login loop)
+- [x] Tag `v1.2.2` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)

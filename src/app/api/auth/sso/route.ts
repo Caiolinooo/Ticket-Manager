@@ -42,10 +42,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Nenhuma sessão do Portal encontrada' },
-        { status: 401 }
-      );
+      // Not an auth failure — soft-SSO simply has nothing to do.
+      // Returning 401 here spam-logged the browser console on every login visit.
+      return NextResponse.json({
+        success: false,
+        skipped: true,
+        error: 'Nenhuma sessão do Portal encontrada',
+      });
     }
 
     const resolved = await resolvePortalSessionFromToken(token);

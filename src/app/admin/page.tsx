@@ -279,27 +279,27 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function loadData() {
       try {
-        const userRes = await fetch('/api/auth/me');
-        if (!userRes.ok) { router.push('/'); return; }
+        const userRes = await fetch('/api/auth/me', { credentials: 'include' });
+        if (!userRes.ok) { router.replace('/'); return; }
         const userData = await userRes.json();
         if (userData.user.role !== 'ADMIN' && userData.user.role !== 'AGENT') {
-          router.push('/client'); return;
+          router.replace('/client'); return;
         }
         setUser(userData.user);
 
-        const ticketsRes = await fetch('/api/tickets');
+        const ticketsRes = await fetch('/api/tickets', { credentials: 'include' });
         if (ticketsRes.ok) {
           const ticketsData = await ticketsRes.json();
           setTickets(ticketsData.tickets);
         }
 
-        const agentsRes = await fetch('/api/users');
+        const agentsRes = await fetch('/api/users', { credentials: 'include' });
         if (agentsRes.ok) {
           const agentsData = await agentsRes.json();
           setAgents(agentsData.agents);
         }
 
-        const tracesRes = await fetch('/api/integrations/pending');
+        const tracesRes = await fetch('/api/integrations/pending', { credentials: 'include' });
         if (tracesRes.ok) {
           const tracesData = await tracesRes.json();
           setPendingTraces(tracesData.pendingTraces);
@@ -307,8 +307,8 @@ export default function AdminDashboard() {
 
         await loadSettings();
       } catch (err) {
-        console.error('Error loading initial data:', err);
-        router.push('/');
+        console.error('Error loading initial data:', err instanceof Error ? err.message : err);
+        router.replace('/');
       }
     }
     loadData();

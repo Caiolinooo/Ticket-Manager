@@ -78,22 +78,22 @@ export default function ClientPortal() {
     // 1. Fetch Session & Tickets
     async function loadData() {
       try {
-        const userRes = await fetch('/api/auth/me');
+        const userRes = await fetch('/api/auth/me', { credentials: 'include' });
         if (!userRes.ok) {
-          router.push('/');
+          router.replace('/');
           return;
         }
         const userData = await userRes.json();
         setUser(userData.user);
 
-        const ticketsRes = await fetch('/api/tickets');
+        const ticketsRes = await fetch('/api/tickets', { credentials: 'include' });
         if (ticketsRes.ok) {
           const ticketsData = await ticketsRes.json();
           setTickets(ticketsData.tickets);
         }
       } catch (err) {
-        console.error('Error loading data:', err);
-        router.push('/');
+        console.error('Error loading data:', err instanceof Error ? err.message : err);
+        router.replace('/');
       }
     }
     loadData();

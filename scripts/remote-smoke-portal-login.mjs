@@ -53,6 +53,23 @@ async function main() {
     process.exit(1);
   }
 
+  const setCookieRaw = typeof loginRes.headers.getSetCookie === 'function'
+    ? loginRes.headers.getSetCookie()
+    : [loginRes.headers.get('set-cookie')].filter(Boolean);
+  const setCookieJoined = setCookieRaw.join(' | ');
+  const baseIsHttp = base.startsWith('http://');
+  const hasSecure = /;\s*Secure/i.test(setCookieJoined);
+  console.log('session_cookie_flags', {
+    hasSession: /session=/i.test(setCookieJoined),
+    secure: hasSecure,
+    httpOnly: /;\s*HttpOnly/i.test(setCookieJoined),
+    sameSite: (setCookieJoined.match(/;\s*SameSite=([^;]+)/i) || [])[1] || null,
+  });
+  if (baseIsHttp && hasSecure) {
+    console.error('FAIL: Set-Cookie has Secure on HTTP base — browser will drop the cookie');
+    process.exit(1);
+  }
+
   const cookie = parseSetCookie(loginRes);
   if (!cookie.includes('session=')) {
     console.error('FAIL: session cookie missing');
@@ -61,6 +78,7 @@ async function main() {
 
   const meRes = await fetch(`${base}/api/auth/me`, {
     headers: { Cookie: cookie },
+    credentials: 'include',
   });
   const meBody = await meRes.json();
   console.log('me', { http: meRes.status, role: meBody.user?.role, authSource: meBody.user?.authSource });
