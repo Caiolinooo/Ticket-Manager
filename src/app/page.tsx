@@ -1,8 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, Mail, ShieldAlert, Cpu, CheckCircle } from 'lucide-react';
+
+function redirectForRole(role: string, router: ReturnType<typeof useRouter>) {
+  if (role === 'ADMIN' || role === 'AGENT') {
+    router.push('/admin');
+  } else {
+    router.push('/client');
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +18,42 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkingSso, setCheckingSso] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function tryExistingSession() {
+      try {
+        const meRes = await fetch('/api/auth/me');
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (!cancelled && meData.user?.role) {
+            redirectForRole(meData.user.role, router);
+            return;
+          }
+        }
+
+        const ssoRes = await fetch('/api/auth/sso', { method: 'POST' });
+        if (ssoRes.ok) {
+          const ssoData = await ssoRes.json();
+          if (!cancelled && ssoData.user?.role) {
+            redirectForRole(ssoData.user.role, router);
+            return;
+          }
+        }
+      } catch {
+        // stay on login
+      } finally {
+        if (!cancelled) setCheckingSso(false);
+      }
+    }
+
+    tryExistingSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,14 +78,10 @@ export default function LoginPage() {
         throw new Error(data.error || 'Erro ao realizar login');
       }
 
-      // Redirect based on user role
-      if (data.user.role === 'ADMIN' || data.user.role === 'AGENT') {
-        router.push('/admin');
-      } else {
-        router.push('/client');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Falha na conexão com o servidor.');
+      redirectForRole(data.user.role, router);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Falha na conexão com o servidor.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -65,6 +105,10 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-slate-400">
             Plataforma Inteligente de Chamados e Auditoria
           </p>
+          <p className="mt-3 text-xs text-slate-500 max-w-sm">
+            Área do cliente: use as mesmas credenciais do Portal (EmployeeHub).
+            Operadores usam as credenciais administrativas locais.
+          </p>
         </div>
 
         {/* Login Card */}
@@ -72,6 +116,12 @@ export default function LoginPage() {
           {/* Card subtle top highlight */}
           <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-indigo-500/30 to-transparent"></div>
 
+          {checkingSso ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400 text-sm">
+              <div className="h-6 w-6 border-2 border-white/20 border-t-indigo-400 rounded-full animate-spin" />
+              Verificando sessão…
+            </div>
+          ) : (
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
               <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 flex items-start gap-2.5 text-red-200 text-sm animate-shake">
@@ -132,6 +182,7 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+          )}
         </div>
 
         {/* Small footer */}

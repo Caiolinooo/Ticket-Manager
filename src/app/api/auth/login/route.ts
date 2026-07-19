@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 import * as crypto from 'crypto';
-import { cookies } from 'next/headers';
+import { prisma } from '@/lib/db';
+import { setSessionCookie } from '@/lib/auth';
+import {
+  authenticatePortalUser,
+  ensureEmployeeFromPortal,
+} from '@/lib/portal-auth';
 
 function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -12,53 +16,110 @@ export async function POST(request: Request) {
     const { email, password } = await request.json();
 
     if (!email || !password) {
-      return NextResponse.json({ success: false, error: 'E-mail e senha são obrigatórios' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'E-mail e senha são obrigatórios' },
+        { status: 400 }
+      );
     }
 
-    const passwordHash = hashPassword(password);
-    
-    // Find user
-    const user = await prisma.supportUser.findUnique({
-      where: { email }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const localUser = await prisma.supportUser.findFirst({
+      where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
     });
 
-    if (!user || user.passwordHash !== passwordHash) {
-      return NextResponse.json({ success: false, error: 'Credenciais inválidas' }, { status: 401 });
+    // Admin / Agent: local Ticket-Manager credentials only
+    if (localUser && (localUser.role === 'ADMIN' || localUser.role === 'AGENT')) {
+      const passwordHash = hashPassword(password);
+      if (localUser.passwordHash !== passwordHash) {
+        return NextResponse.json(
+          { success: false, error: 'Credenciais inválidas' },
+          { status: 401 }
+        );
+      }
+
+      const sessionData = {
+        id: localUser.id,
+        name: localUser.name,
+        email: localUser.email,
+        role: localUser.role,
+        authSource: 'local' as const,
+      };
+
+      await setSessionCookie(sessionData);
+
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: localUser.id,
+            action: 'LOGIN',
+            details: `Usuário ${localUser.name} logou no sistema (local).`,
+          },
+        });
+      } catch (auditError) {
+        console.error('Login audit log error (non-critical):', auditError);
+      }
+
+      return NextResponse.json({ success: true, user: sessionData });
     }
 
-    // Set session cookie
+    // Client / Employee: EmployeeHub / Portal credentials (public.users_unified)
+    const portal = await authenticatePortalUser(normalizedEmail, password);
+    if (!portal.ok) {
+      return NextResponse.json(
+        { success: false, error: portal.error },
+        { status: portal.status }
+      );
+    }
+
+    if (localUser && (localUser.role === 'ADMIN' || localUser.role === 'AGENT')) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Esta conta é de operador. Use as credenciais administrativas do Ticket-Manager.',
+        },
+        { status: 403 }
+      );
+    }
+
+    const employee = await ensureEmployeeFromPortal(portal.user);
+
+    if (employee.role === 'ADMIN' || employee.role === 'AGENT') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Esta conta é de operador. Use as credenciais administrativas do Ticket-Manager.',
+        },
+        { status: 403 }
+      );
+    }
+
     const sessionData = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      role: 'EMPLOYEE',
+      authSource: 'portal' as const,
+      portalUserId: portal.user.id,
     };
 
-    const sessionString = Buffer.from(JSON.stringify(sessionData)).toString('base64');
-    
-    const cookieStore = await cookies();
-    cookieStore.set('session', sessionString, {
-      httpOnly: true,
-      secure: false,
-      maxAge: 60 * 60 * 24, // 1 day
-      path: '/'
-    });
+    await setSessionCookie(sessionData);
 
-    // Also write an audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'LOGIN',
-        details: `Usuário ${user.name} logou no sistema.`
-      }
-    });
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: employee.id,
+          action: 'LOGIN',
+          details: `Usuário ${employee.name} logou via Portal (EmployeeHub).`,
+        },
+      });
+    } catch (auditError) {
+      console.error('Login audit log error (non-critical):', auditError);
+    }
 
-    return NextResponse.json({
-      success: true,
-      user: sessionData
-    });
-  } catch (error: any) {
+    return NextResponse.json({ success: true, user: sessionData });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro interno';
     console.error('Login API error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

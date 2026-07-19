@@ -81,6 +81,8 @@ Atualizado: 2026-07-19
 - [x] Tag `v1.0.2` + push
 - [x] Bump minor `1.1.0` — agrupamento Teams + IA auditoria
 - [x] Tag `v1.1.0` + push
+- [ ] Bump minor `1.2.0` — auth client EmployeeHub/Portal
+- [ ] Tag `v1.2.0` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -157,6 +159,27 @@ Atualizado: 2026-07-19
 - [x] Bump `1.1.0`
 - [x] Commit + tag + push
 - [x] Deploy server (rsync, migrate cols, build, pm2)
+
+---
+
+## 8. Auth Client ↔ EmployeeHub / Portal (v1.2.0)
+
+### Descoberta
+- [x] EmployeeHub: login em `/api/auth/login` → bcrypt em `public.users_unified` → JWT cookie `abzToken` (`JWT_SECRET`)
+- [x] TM antigo: `SupportUser` + cookie `session` base64 (inseguro)
+- [x] Mesmo Postgres Supabase (schemas `public` + `ticket_support`)
+
+### Implementação
+- [x] `src/lib/portal-auth.ts` — validar e-mail/senha / JWT do Portal
+- [x] `src/lib/auth.ts` — sessão JWT assinada (`TM_SESSION_SECRET` ou `JWT_SECRET`)
+- [x] Login: ADMIN/AGENT local; client via Portal
+- [x] Soft-SSO `POST /api/auth/sso` (cookie `abzToken` ou Bearer)
+- [x] Upsert `SupportUser` EMPLOYEE ao logar pelo Portal
+- [x] UI login: hint Portal + auto-check sessão/SSO
+- [x] `.env.example` + README (sem secrets)
+- [x] Smoke `scripts/smoke-portal-auth.mjs`
+- [ ] Deploy server: `JWT_SECRET` alinhado ao Portal + build + pm2
+- [ ] Validar login client com usuário real do Portal
 
 ---
 

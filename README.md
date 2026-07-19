@@ -2,7 +2,7 @@
 
 Sistema de gestão de tickets de suporte que coleta mensagens de **Microsoft Exchange (e-mail)** e **Microsoft Teams** via Microsoft Graph, tria com IA e organiza o fluxo de aprovação/atendimento.
 
-**Versão:** 1.0.1  
+**Versão:** 1.2.0  
 **Autor:** Caio Correia  
 **Licença:** Proprietária — ver [LICENSE](./LICENSE)
 
@@ -52,13 +52,33 @@ Copie `.env.example` para `.env` e preencha (nunca commite secrets):
 
 | Variável | Descrição |
 |----------|-----------|
-| `DATABASE_URL` | Connection string PostgreSQL (pooler IPv4 ok) |
+| `DATABASE_URL` | Connection string PostgreSQL (pooler IPv4 ok); precisa acessar `public.users_unified` e `ticket_support` |
+| `JWT_SECRET` | Mesmo secret do EmployeeHub/Portal — valida soft-SSO (`abzToken`) e assina sessão se `TM_SESSION_SECRET` ausente |
+| `TM_SESSION_SECRET` | Opcional — secret dedicado do cookie de sessão do Ticket-Manager |
+| `PORTAL_JWT_COOKIE` | Nome do cookie JWT do Portal (default `abzToken`) |
 | `MS_GRAPH_CLIENT_ID` | Application (client) ID do app Azure |
 | `MS_GRAPH_CLIENT_SECRET` | Client secret do app |
 | `MS_GRAPH_TENANT_ID` | Directory (tenant) ID |
 | `GEMINI_API_KEY` | Chave Gemini (opcional se já existir em SystemConfig) |
 
 Configurações adicionais ficam em **SystemConfig** (banco / Admin UI), não necessariamente no `.env`.
+
+---
+
+## Autenticação (Admin vs Client)
+
+| Área | Fonte de credenciais |
+|------|----------------------|
+| **Admin / Agent** | Tabela `ticket_support.SupportUser` (hash SHA-256 local) |
+| **Client (funcionário)** | Mesmas credenciais do Portal / EmployeeHub (`public.users_unified`, bcrypt) |
+
+Fluxo do client:
+
+1. Login em `/` com e-mail/senha do Portal → TM valida bcrypt em `users_unified` → upsert de `SupportUser` role `EMPLOYEE` → cookie de sessão JWT (`session`).
+2. Soft-SSO: se o browser já tiver o cookie JWT do Portal (`abzToken`) e `JWT_SECRET` for o mesmo, `POST /api/auth/sso` cria a sessão do client sem pedir senha de novo (só funciona se o cookie for visível no host do TM — mesmo site/domínio pai).
+3. Logout limpa o cookie `session` do TM (não encerra a sessão do Portal em outro domínio).
+
+Smoke local: `node scripts/smoke-portal-auth.mjs` (opcional: `PORTAL_TEST_EMAIL` + `PORTAL_TEST_PASSWORD`).
 
 ---
 

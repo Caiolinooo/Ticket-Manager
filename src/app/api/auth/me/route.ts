@@ -8,7 +8,8 @@ export async function GET() {
       return NextResponse.json({ success: false, error: 'Não autenticado' }, { status: 401 });
     }
     return NextResponse.json({ success: true, user: session });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro interno';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
