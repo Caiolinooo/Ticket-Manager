@@ -1,0 +1,98 @@
+datasource db {
+  provider = "postgresql"
+  schemas  = ["ticket_support"]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+model SupportUser {
+  id              String          @id @default(uuid())
+  email           String          @unique
+  passwordHash    String
+  name            String
+  role            String          // "ADMIN" | "AGENT" | "EMPLOYEE"
+  microsoftUserId String?
+  createdAt       DateTime        @default(now())
+
+  createdTickets  Ticket[]        @relation("CreatedTickets")
+  assignedTickets Ticket[]        @relation("AssignedTickets")
+  messages        TicketMessage[]
+  auditLogs       AuditLog[]
+
+  @@schema("ticket_support")
+}
+
+model Ticket {
+  id                  String          @id @default(uuid())
+  title               String
+  description         String
+  status              String          // "OPEN" | "IN_PROGRESS" | "PENDING" | "RESOLVED" | "CLOSED"
+  priority            String          // "LOW" | "MEDIUM" | "HIGH" | "URGENT"
+  category            String
+  resolution          String?         // How the ticket was resolved (filled by AI or admin on close)
+  createdById         String
+  assignedToId        String?
+  source              String          // "PORTAL" | "TEAMS" | "EMAIL"
+  externalReferenceId String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  resolvedAt          DateTime?
+
+  creator             SupportUser     @relation("CreatedTickets", fields: [createdById], references: [id])
+  assignee            SupportUser?    @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  messages            TicketMessage[]
+  externalTraces      ExternalTrace[]
+
+  @@schema("ticket_support")
+}
+
+model TicketMessage {
+  id        String      @id @default(uuid())
+  ticketId  String
+  senderId  String
+  content   String
+  createdAt DateTime    @default(now())
+
+  ticket    Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender    SupportUser @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@schema("ticket_support")
+}
+
+model ExternalTrace {
+  id               String    @id @default(uuid())
+  ticketId         String?   // Nullable initially when it's just a pending trace
+  platform         String    // "TEAMS" | "EXCHANGE"
+  externalId       String    @unique
+  originalSender   String
+  channelOrSubject String
+  rawContent       String
+  status           String    // "PENDING_APPROVAL" | "APPROVED" | "IGNORED"
+  receivedAt       DateTime  @default(now())
+
+  ticket           Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@schema("ticket_support")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  userId    String
+  action    String
+  details   String
+  createdAt DateTime    @default(now())
+
+  user      SupportUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@schema("ticket_support")
+}
+
+model SystemConfig {
+  key   String @id
+  value String
+
+  @@schema("ticket_support")
+}
