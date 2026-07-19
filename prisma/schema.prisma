@@ -67,6 +67,8 @@ model ExternalTrace {
   ticketId         String?   // Nullable initially when it's just a pending trace
   platform         String    // "TEAMS" | "EXCHANGE"
   externalId       String    @unique
+  conversationId   String?   // Teams chatId / Exchange thread key for grouping
+  memberIds        String?   // JSON array of source message IDs merged into this trace
   originalSender   String
   channelOrSubject String
   rawContent       String
@@ -75,6 +77,7 @@ model ExternalTrace {
 
   ticket           Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
 
+  @@index([platform, conversationId, status])
   @@schema("ticket_support")
 }
 

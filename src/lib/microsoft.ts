@@ -14,6 +14,8 @@ export interface MicrosoftMessage {
   bodyPreview: string;
   receivedDateTime: Date;
   platform: 'TEAMS' | 'EXCHANGE';
+  /** Teams chatId / channel thread key; Exchange uses sender+subject key */
+  conversationId: string;
 }
 
 export interface CollectionResult {
@@ -239,9 +241,10 @@ async function fetchTeamsChats(
         senderName: m.from?.user?.displayName || 'Usuário Teams',
         senderEmail,
         subjectOrChannel: chat.topic || `Chat (${chat.chatType || 'oneOnOne'})`,
-        bodyPreview: cleanContent.substring(0, 500),
+        bodyPreview: cleanContent.substring(0, 1500),
         receivedDateTime: msgCreated,
         platform: 'TEAMS',
+        conversationId: `teams-chat:${chat.id}`,
       });
     }
   }
@@ -313,9 +316,10 @@ async function fetchTeamsChannelMessages(
           senderName: m.from.user.displayName || 'Membro do Teams',
           senderEmail,
           subjectOrChannel: `${team.displayName} › ${channel.displayName}`,
-          bodyPreview: cleanContent.substring(0, 500),
+          bodyPreview: cleanContent.substring(0, 1500),
           receivedDateTime: msgCreated,
           platform: 'TEAMS',
+          conversationId: `teams-channel:${team.id}:${channel.id}`,
         });
       }
     }
@@ -486,14 +490,20 @@ export async function fetchExchangeEmails(): Promise<CollectionResult> {
         ];
         if (automatedPatterns.some(p => senderEmail.toLowerCase().includes(p))) continue;
 
+        const normalizedSubject = subject
+          .replace(/^(re|fw|enc|res):\s*/gi, '')
+          .trim()
+          .toLowerCase();
+
         emails.push({
           id: msg.id,
           senderName,
           senderEmail,
           subjectOrChannel: subject,
-          bodyPreview: (msg.bodyPreview || '').substring(0, 500),
+          bodyPreview: (msg.bodyPreview || '').substring(0, 1500),
           receivedDateTime: new Date(msg.receivedDateTime || Date.now()),
           platform: 'EXCHANGE',
+          conversationId: `email:${senderEmail.toLowerCase()}:${normalizedSubject || '(sem-assunto)'}`,
         });
       }
     } catch (err) {

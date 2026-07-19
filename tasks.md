@@ -79,6 +79,8 @@ Atualizado: 2026-07-19
 - [x] Tag `v1.0.1` + push
 - [x] Bump patch `1.0.2` + fix coluna `Ticket.resolution`
 - [x] Tag `v1.0.2` + push
+- [x] Bump minor `1.1.0` — agrupamento Teams + IA auditoria
+- [x] Tag `v1.1.0` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -102,6 +104,7 @@ Atualizado: 2026-07-19
 - [x] `pm2 restart ticket-manager`
 - [x] Redeploy pós-limpeza de branding (v1.0.1)
 - [x] Redeploy pós-fix `Ticket.resolution` (v1.0.2)
+- [x] Redeploy v1.1.0 (agrupamento + Direct Fix auditoria)
 
 ### 4.2 Smoke
 - [x] App respondendo na porta **9120** (`/` e `/admin` → HTTP 200)
@@ -121,6 +124,41 @@ Atualizado: 2026-07-19
 
 ---
 
+## 7. Inteligência — agrupamento + triagem + Direct Fix (v1.1.0)
+
+### Problema
+- Sync Teams gerava 1 pendência por mensagem (mesmo chat/pessoa em segundos = N cards).
+- Direct Fix gerava texto longo/genérico (LGPD, passos inventados).
+- Faltava distinguir continuação do mesmo atendimento vs atendimento novo.
+
+### 7.1 Agrupamento / contexto
+- [x] `conversationId` + `memberIds` em `ExternalTrace` (schema + migration + script SQL)
+- [x] Coleta Teams/Exchange preenche `conversationId` (chatId / canal / email+assunto)
+- [x] `src/lib/trace-grouping.ts`: cluster por chat + remetente + janela 45 min
+- [x] Concatenar histórico no `rawContent` (`[Contexto agrupado — N mensagem(ns)]`)
+- [x] Upsert/merge em `PENDING_APPROVAL` aberto do mesmo chat/thread
+- [x] Rotas Teams/Exchange usam `processMessageBatch` / `upsertGroupedTrace`
+- [x] Approve gera ticket com contexto agrupado completo
+- [x] Smoke unitário: `scripts/smoke-trace-grouping.mjs` (2 msgs → 1 cluster)
+
+### 7.2 Triagem IA
+- [x] `analyzeIncomingMessage` com `isContinuation` + contexto de pendência existente
+- [x] Prompt pede classificação continuação vs novo com base no thread completo
+- [x] Mock alinhado aos novos campos
+
+### 7.3 Direct Fix (auditoria)
+- [x] Prompt reescrito: relatório técnico curto (resumo / evidências / causa / ações / status)
+- [x] Proibir inventar sistemas/LGPD; marcar "a confirmar" sem evidência
+- [x] Mock audit-style (sem boilerplate genérico antigo)
+- [x] Log `[AI/fix] mode=audit-report`
+
+### 7.4 Entrega
+- [x] Bump `1.1.0`
+- [x] Commit + tag + push
+- [x] Deploy server (rsync, migrate cols, build, pm2)
+
+---
+
 ## 6. Próximos passos (backlog)
 
 - [ ] Agendar sync periódico (cron/PM2 ou job interno) usando `sync_interval_minutes`
@@ -128,6 +166,7 @@ Atualizado: 2026-07-19
 - [ ] Observabilidade: health endpoint dedicado + alertas PM2
 - [ ] Documentar runbook de rotação de `MS_GRAPH_CLIENT_SECRET` e Gemini key
 - [ ] Testes E2E (Playwright) para login Admin + sync + approve
+- [ ] (Opcional) Anexar follow-up a Ticket OPEN existente (além de PENDING ExternalTrace)
 
 ---
 

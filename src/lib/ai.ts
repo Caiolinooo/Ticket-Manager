@@ -1,12 +1,19 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { prisma } from '@/lib/db';
 
-interface MessageAnalysis {
+export interface MessageAnalysis {
   isIssue: boolean;
+  /** True when this message continues an open atendimento (same chat/assunto). */
+  isContinuation: boolean;
   category: string;
   priority: string;
   title: string;
   summary: string;
+}
+
+export interface AnalyzeContext {
+  conversationId?: string;
+  existingPendingSummary?: string;
 }
 
 type ResolvedProvider = 'GEMINI' | 'CUSTOM' | 'MOCK';
@@ -151,6 +158,7 @@ function parseAnalysisJson(resultText: string, text: string, sourceLabel: string
   const parsed = JSON.parse(cleanJson);
   return {
     isIssue: !!parsed.isIssue,
+    isContinuation: !!parsed.isContinuation,
     category: parsed.category || 'Geral',
     priority: parsed.priority || 'MEDIUM',
     title: parsed.title || `Chamado Detectado via ${sourceLabel}`,
@@ -158,7 +166,7 @@ function parseAnalysisJson(resultText: string, text: string, sourceLabel: string
   };
 }
 
-function smartMockAnalysis(text: string): MessageAnalysis {
+function smartMockAnalysis(text: string, ctx?: AnalyzeContext): MessageAnalysis {
   const lowerText = text.toLowerCase();
 
   let category = 'Geral';
@@ -179,6 +187,15 @@ function smartMockAnalysis(text: string): MessageAnalysis {
     'resolvido', 'funcionou', 'deu certo', 'esquece', 'obrigado', 'resolvi', 'deixa pra lá',
   ];
   const isResolved = hasResolvedKeywords.some(kw => lowerText.includes(kw));
+
+  const continuationHints = [
+    'ainda', 'continua', 'mesmo problema', 'como falei', 'sobre aquilo',
+    'update', 'atualizando', 'tentei de novo', 'não deu',
+  ];
+  const looksLikeContinuation =
+    !!ctx?.existingPendingSummary ||
+    continuationHints.some(kw => lowerText.includes(kw)) ||
+    lowerText.includes('[contexto agrupado');
 
   if (isDirectIssue && !isResolved) {
     isIssue = true;
@@ -205,6 +222,7 @@ function smartMockAnalysis(text: string): MessageAnalysis {
 
   return {
     isIssue,
+    isContinuation: looksLikeContinuation && (isIssue || !!ctx?.existingPendingSummary),
     category,
     priority,
     title: title || 'Pendência Pendente via Chat',
@@ -212,16 +230,76 @@ function smartMockAnalysis(text: string): MessageAnalysis {
   };
 }
 
+function buildTriagePrompt(
+  text: string,
+  sender: string,
+  platform?: 'TEAMS' | 'EXCHANGE',
+  ctx?: AnalyzeContext
+): string {
+  const existingBlock = ctx?.existingPendingSummary
+    ? `
+CONTEXTO DE PENDÊNCIA JÁ ABERTA (mesmo chat/thread recente):
+"""
+${ctx.existingPendingSummary}
+"""
+Se a nova mensagem for continuidade óbvia do mesmo assunto, marque isContinuation=true e isIssue=true (não trate como chamado novo isolado).
+`
+    : '';
+
+  const conversationHint = ctx?.conversationId
+    ? `Identificador da conversa: ${ctx.conversationId}`
+    : '';
+
+  return `
+Você é um analista de triagem de suporte de TI corporativo. Seu papel é classificar relatos com precisão — sem inventar detalhes.
+
+Analise o texto abaixo enviado por ${sender}${platform ? ` via ${platform}` : ''}.
+${conversationHint}
+${existingBlock}
+
+O texto pode ser um CONTEXTO AGRUPADO (várias mensagens do mesmo chat com timestamps). Use o histórico completo para decidir.
+
+Classifique:
+1) Há problema técnico pendente que a TI deve tratar? (isIssue)
+2) É CONTINUAÇÃO de um atendimento já em andamento no mesmo chat/assunto, ou um atendimento NOVO? (isContinuation)
+   - Continuação: mesmo chat, mesmo assunto, follow-up, "ainda não funciona", detalhes adicionais.
+   - Novo: assunto diferente, outro sistema, ou intervalo/contexto claramente distinto.
+
+Regras:
+- Mensagens informais do Teams ("tá lento", "não imprime", "não consigo abrir") CONTAM como issue se houver pendência.
+- Se o funcionário disser que já resolveu / obrigado sem nova pendência → isIssue=false, isContinuation=false.
+- NÃO invente sistemas, portais ou sintomas que não estejam no texto.
+- title e summary devem refletir o contexto agrupado (não só a última linha).
+
+Texto:
+"""
+${text}
+"""
+
+Responda ESTRITAMENTE em JSON puro (sem markdown):
+{
+  "isIssue": boolean,
+  "isContinuation": boolean,
+  "category": "Hardware" | "Software" | "Acessos" | "Redes" | "Geral",
+  "priority": "LOW" | "MEDIUM" | "HIGH" | "URGENT",
+  "title": "título curto e profissional",
+  "summary": "resumo técnico de 1 a 3 frases com base no contexto completo"
+}
+`;
+}
+
 /**
- * Analyzes a raw text message from Teams or Exchange to determine if it's an IT support issue.
+ * Analyzes a raw text message (or grouped thread context) from Teams/Exchange.
  */
 export async function analyzeIncomingMessage(
   text: string,
   sender: string,
-  platform?: 'TEAMS' | 'EXCHANGE'
+  platform?: 'TEAMS' | 'EXCHANGE',
+  ctx?: AnalyzeContext
 ): Promise<MessageAnalysis> {
   const defaultResponse: MessageAnalysis = {
     isIssue: false,
+    isContinuation: false,
     category: 'Geral',
     priority: 'LOW',
     title: '',
@@ -232,36 +310,14 @@ export async function analyzeIncomingMessage(
     return defaultResponse;
   }
 
-  const prompt = `
-Você é uma inteligência artificial especialista em triagem de suporte de TI corporativo.
-Analise a seguinte mensagem enviada por um funcionário${platform ? ` via ${platform}` : ''} (${sender}) e determine se ela descreve, mesmo que informalmente, um problema técnico pendente, erro de sistema, necessidade de suporte, reset de senha, falha de hardware/software, ou qualquer situação que exija ação da equipe de TI.
-
-IMPORTANTE: Mensagens do Teams costumam ser informais. Considere também situações como:
-- "não consigo abrir o sistema", "tá lento", "caiu a internet", "não imprime"
-- Reclamações genéricas sobre tecnologia ou sistemas corporativos
-- Pedidos de ajuda mesmo que vagos ("você pode me ajudar com uma coisa?")
-- Relatos de problema feitos de forma coloquial ou incompleta
-
-ATENÇÃO: Se o funcionário disser explicitamente que o problema já foi resolvido, que deu certo, ou for apenas um agradecimento/aviso sem pendência em aberto, responda isIssue = false.
-
-Mensagem:
-"${text}"
-
-Responda ESTRITAMENTE em formato JSON (sem markdown, sem blocos de código, apenas JSON puro) com a seguinte estrutura:
-{
-  "isIssue": boolean, // true se houver qualquer problema técnico pendente que a TI deveria saber
-  "category": "Hardware" | "Software" | "Acessos" | "Redes" | "Geral",
-  "priority": "LOW" | "MEDIUM" | "HIGH" | "URGENT",
-  "title": "título curto e profissional resumindo o problema",
-  "summary": "resumo profissional de 1 a 2 frases detalhando o que o funcionário relatou e o que precisa ser feito"
-}
-`;
+  const prompt = buildTriagePrompt(text, sender, platform, ctx);
 
   const config = await getAiConfig();
   const order = resolveProviderOrder(config);
   console.log(
     `[AI] providerOrder=${order.join('→')} ai_provider_setting=${config.ai_provider} ` +
-      `geminiKey=${config.gemini_api_key ? 'yes' : 'no'} customUrl=${config.custom_ai_url ? 'yes' : 'no'}`
+      `geminiKey=${config.gemini_api_key ? 'yes' : 'no'} customUrl=${config.custom_ai_url ? 'yes' : 'no'} ` +
+      `continuationCtx=${ctx?.existingPendingSummary ? 'yes' : 'no'}`
   );
 
   for (const provider of order) {
@@ -289,41 +345,115 @@ Responda ESTRITAMENTE em formato JSON (sem markdown, sem blocos de código, apen
 
     if (provider === 'MOCK') {
       console.log('[AI] Using Smart Mock keyword triage');
-      return smartMockAnalysis(text);
+      return smartMockAnalysis(text, ctx);
     }
   }
 
-  return smartMockAnalysis(text);
+  return smartMockAnalysis(text, ctx);
+}
+
+function buildDirectFixPrompt(title: string, description: string, category: string): string {
+  return `
+Você é um técnico de TI preenchendo um RELATÓRIO DE AUDITORIA / guia de correção direta.
+Tom: objetivo, factual, específico ao conteúdo do chamado. Sem enrolação, sem boilerplate genérico.
+
+PROIBIDO:
+- Inventar sistemas, portais, servidores, políticas LGPD/compliance ou passos sem evidência no relato
+- Textos genéricos do tipo "verificar boas práticas", "garantir conformidade", "entrar em contato para entender melhor" sem necessidade
+- Textos inventados (ex.: SU01, FortiClient, IP do 3º andar) se NÃO constarem no relato — se precisar, marque como "a confirmar"
+- Textos longos, motivacionais ou repetitivos
+
+OBRIGATÓRIO — use EXATAMENTE esta estrutura Markdown (máx. ~400–600 palavras no total):
+
+### Relatório técnico — Correção direta
+
+**1. Resumo do problema**
+(1–2 frases, só com base no relato)
+
+**2. Evidências**
+(trechos relevantes das mensagens/descrição; cite literalmente quando possível)
+
+**3. Causa provável**
+(somente se suportada pelo contexto; senão: "Insuficiente no relato — a confirmar")
+
+**4. Ações executadas / a executar**
+(checklist curto, específico, numerado; cada item verificável)
+
+**5. Resultado / status**
+(ex.: pendente de execução | resolvido após X | aguardando confirmação do usuário)
+
+Dados do chamado:
+- Título: "${title}"
+- Categoria: "${category}"
+- Descrição / contexto:
+"""
+${description}
+"""
+`;
+}
+
+function smartMockDirectFix(title: string, description: string, category: string): string {
+  const evidence = description
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((l) => `- ${l.substring(0, 180)}`)
+    .join('\n');
+
+  const lower = `${title} ${description}`.toLowerCase();
+  const actions: string[] = [];
+
+  if (lower.includes('senha') || lower.includes('bloqueado') || lower.includes('acesso') || category === 'Acessos') {
+    actions.push('Validar se a conta do usuário está bloqueada no diretório (AD) — a confirmar ferramenta usada no ambiente.');
+    actions.push('Se houver menção a SAP no relato: verificar bloqueio/reset na transação indicada pelo cliente (a confirmar).');
+    actions.push('Registrar senha temporária apenas se o procedimento padrão da empresa autorizar; comunicar ao usuário por canal seguro.');
+  } else if (lower.includes('impressora') || category === 'Hardware') {
+    actions.push('Confirmar status online da impressora citada no relato (ping/painel — a confirmar IP/nome).');
+    actions.push('Verificar fila/spooler no posto do usuário e limpar trabalhos travados se aplicável.');
+    actions.push('Orientar reinício físico do equipamento se o relato indicar atolamento ou luz de erro.');
+  } else if (lower.includes('vpn') || lower.includes('rede') || category === 'Redes') {
+    actions.push('Validar conectividade local do usuário (link/Wi-Fi) antes do túnel VPN.');
+    actions.push('Coletar sintoma exato (erro na tela / momento da falha) a partir do contexto agrupado.');
+    actions.push('Testar reconexão do cliente VPN corporativo usado no ambiente (nome a confirmar).');
+  } else {
+    actions.push('Reproduzir o sintoma descrito nas evidências com o usuário ou no ambiente equivalente.');
+    actions.push('Isolar se o problema é estação, rede ou aplicação — com base só no que o relato permite.');
+    actions.push('Documentar o resultado do teste e próxima ação específica.');
+  }
+
+  return `### Relatório técnico — Correção direta
+
+**1. Resumo do problema**
+${title}. Categoria: ${category}.
+
+**2. Evidências**
+${evidence || '- (sem trechos adicionais no relato)'}
+
+**3. Causa provável**
+Insuficiente no relato para afirmar causa raiz — a confirmar após as ações abaixo.
+
+**4. Ações executadas / a executar**
+${actions.map((a, i) => `${i + 1}. ${a}`).join('\n')}
+
+**5. Resultado / status**
+Pendente de execução / validação com o solicitante.`;
 }
 
 /**
- * Generates automated fix suggestions / solutions for a given ticket
+ * Generates an audit-style direct-fix report for a ticket (not generic fluff).
  */
 export async function suggestDirectFix(title: string, description: string, category: string): Promise<string> {
-  const prompt = `
-Você é uma inteligência artificial especialista em suporte de TI (Nível 2).
-Sua tarefa é ler o título, a descrição e a categoria de um chamado de suporte aberto e sugerir uma lista detalhada, passo a passo, de procedimentos técnicos recomendados (no formato Markdown) que o técnico pode executar diretamente para resolver o chamado.
-
-Título do Chamado: "${title}"
-Categoria: "${category}"
-Descrição do Problema:
-"${description}"
-
-Forneça sua resposta em Markdown limpo contendo:
-### 💡 Guia de Correção Direta
-- Passos técnicos organizados em ordem lógica.
-- Comandos ou transações específicas (se aplicável, ex: SU01 no SAP, ipconfig, etc.).
-- Procedimentos claros e diretos.
-`;
+  const prompt = buildDirectFixPrompt(title, description, category);
 
   const config = await getAiConfig();
   const order = resolveProviderOrder(config);
-  console.log(`[AI/fix] providerOrder=${order.join('→')}`);
+  console.log(`[AI/fix] providerOrder=${order.join('→')} mode=audit-report`);
 
   for (const provider of order) {
     if (provider === 'GEMINI') {
       try {
-        console.log('[AI/fix] Calling Gemini API');
+        console.log('[AI/fix] Calling Gemini API (audit direct-fix)');
         return await callGemini(config.gemini_api_key, prompt);
       } catch (err) {
         console.error('[AI/fix] Gemini failed, trying next provider:', err);
@@ -342,86 +472,6 @@ Forneça sua resposta em Markdown limpo contendo:
     }
   }
 
-  // Smart Mock Fix Suggestions based on categories & keywords
-  const titleLower = title.toLowerCase();
-  const descLower = description.toLowerCase();
-
-  if (category === 'Acessos' || titleLower.includes('senha') || descLower.includes('senha') || descLower.includes('bloqueado') || descLower.includes('sap')) {
-    return `### 💡 Guia de Correção Direta (Acessos/SAP)
-
-1. **Verificar Estado da Conta Active Directory (AD)**:
-   - Abra o console do AD e busque pelo e-mail do usuário.
-   - Verifique se a conta está marcada como \`Locked Out\`. Se sim, clique em \`Unlock Account\`.
-2. **Reset de Senha SAP**:
-   - Acesse a transação \`SU01\` no SAP GUI.
-   - Digite o login do usuário e clique no ícone do cadeado para verificar bloqueios de senha.
-   - Clique em "Modificar" (F6) -> Aba "Dados de Logon" -> "Nova Senha".
-   - Defina uma senha temporária segura (ex: \`Empresa@2026\`) e marque a opção "Exigir alteração no próximo logon".
-3. **Notificação**:
-   - Envie a senha temporária de forma segura ao funcionário via Teams ou SMS.
-4. **Auditoria**:
-   - Registre o ID de desbloqueio nos logs do sistema de auditoria.`;
-  }
-
-  if (category === 'Hardware' || titleLower.includes('impressora') || descLower.includes('impressora') || descLower.includes('tela azul') || descLower.includes('azul')) {
-    if (titleLower.includes('impressora') || descLower.includes('impressora')) {
-      return `### 💡 Guia de Correção Direta (Impressora)
-
-1. **Verificação de Rede & Fila de Impressão**:
-   - Dê ping no IP da impressora do 3º andar para validar se está online.
-   - Acesse o servidor de impressão local e limpe a fila de impressão pendente (\`Spooler\`).
-2. **Resolução Física (Atolamento de Papel)**:
-   - Oriente o funcionário a abrir a gaveta lateral direita da impressora e remover com cuidado qualquer fragmento de papel preso no rolo fusor.
-   - Verifique os sensores ópticos de papel; poeira pode causar alertas falsos de luz vermelha.
-3. **Reinicialização**:
-   - Solicite desligar a impressora, aguardar 30 segundos e ligar novamente.`;
-    }
-    return `### 💡 Guia de Correção Direta (Tela Azul / BSOD)
-
-1. **Identificar o Driver Causador**:
-   - Peça ao funcionário para reiniciar o notebook em **Modo de Segurança com Rede**.
-   - Execute o visualizador de eventos ou a ferramenta \`BlueScreenView\` para analisar o arquivo minidump (\`C:\\Windows\\Minidump\`).
-2. **Atualização/Reversão de Drivers**:
-   - Se o erro for \`SYSTEM_THREAD_EXCEPTION_NOT_HANDLED\`, geralmente está ligado ao driver de vídeo ou de rede Wifi.
-   - Acesse o Gerenciador de Dispositivos, clique com o botão direito no adaptador suspeito e selecione "Reverter Driver", ou baixe a versão mais recente oficial no site do fabricante (Dell/Lenovo).
-3. **Verificação de Arquivos de Sistema**:
-   - Abra o Prompt de Comando como Administrador e execute:
-     \`\`\`cmd
-     sfc /scannow
-     DISM /Online /Cleanup-Image /RestoreHealth
-     \`\`\`
-4. **Substituição de Hardware (Se persistir)**:
-   - Agende a coleta do notebook para análise física de memória RAM ou SSD.`;
-  }
-
-  if (category === 'Redes' || titleLower.includes('vpn') || descLower.includes('vpn')) {
-    return `### 💡 Guia de Correção Direta (VPN / Rede)
-
-1. **Diagnóstico de Conexão Local**:
-   - Solicite que o funcionário acesse [fast.com](https://fast.com) para verificar a velocidade e estabilidade da conexão residencial.
-   - Verifique se ele está utilizando cabo ou Wi-Fi (conexões Wi-Fi instáveis derrubam o túnel VPN).
-2. **Reset da Pilha de Rede (No notebook do usuário)**:
-   - Oriente-o a abrir o PowerShell como Administrador e rodar os seguintes comandos:
-     \`\`\`powershell
-     ipconfig /release
-     ipconfig /renew
-     ipconfig /flushdns
-     netsh int ip reset
-     netsh winsock reset
-     \`\`\`
-   - Reinicie o computador.
-3. **Configuração do Cliente VPN (FortiClient/Cisco AnyConnect)**:
-   - Abra as configurações da VPN e verifique se o gateway de destino está correto.
-   - Limpe o cache do navegador e do cliente VPN.
-   - Se necessário, reinstale o perfil de conexão da empresa.`;
-  }
-
-  return `### 💡 Guia de Correção Direta (Geral)
-
-1. **Entrar em contato com o Solicitante**:
-   - Inicie um chat rápido no Teams com o funcionário para validar detalhes adicionais do comportamento do problema.
-2. **Verificar Logs de Servidor**:
-   - Se for um bug de sistema, verifique os logs da aplicação afetada no painel de monitoramento do servidor corporativo.
-3. **Escalação**:
-   - Caso o problema exija privilégios adicionais, encaminhe o ticket para a equipe de infraestrutura Nível 3.`;
+  console.log('[AI/fix] Using Smart Mock audit-style report');
+  return smartMockDirectFix(title, description, category);
 }

@@ -46,14 +46,21 @@ export async function POST(request: Request) {
       });
     }
 
-    // 4. Run AI analysis to get structured category, priority, and title
-    const analysis = await analyzeIncomingMessage(trace.rawContent, employee.name);
+    // 4. Run AI analysis on full grouped context (title/category/priority)
+    const analysis = await analyzeIncomingMessage(
+      trace.rawContent,
+      employee.name,
+      trace.platform === 'EXCHANGE' ? 'EXCHANGE' : 'TEAMS',
+      { conversationId: trace.conversationId || undefined }
+    );
 
-    // 5. Create Ticket
+    // 5. Create Ticket — description keeps the full grouped thread context
     const ticket = await prisma.ticket.create({
       data: {
         title: analysis.title || trace.channelOrSubject || 'Chamado via ' + trace.platform,
-        description: trace.rawContent,
+        description: analysis.summary
+          ? `${analysis.summary}\n\n---\n${trace.rawContent}`
+          : trace.rawContent,
         status: 'OPEN',
         priority: analysis.priority || 'MEDIUM',
         category: analysis.category || 'Geral',

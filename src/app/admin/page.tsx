@@ -568,9 +568,16 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      if (data.trace.status === 'PENDING_APPROVAL') {
-        setSimSuccessMsg(`Mensagem injetada! A IA identificou: "${data.aiAnalysis.title}" e gerou uma pendência na aba Pendências.`);
-        setPendingTraces([data.trace, ...pendingTraces]);
+      const injectedTrace = data.trace;
+      const analysisTitle = data.aiAnalysis?.title || 'Pendência detectada';
+
+      if (injectedTrace?.status === 'PENDING_APPROVAL') {
+        const mergeHint = data.action === 'merged' ? ' (mesclado ao mesmo chat/thread)' : '';
+        setSimSuccessMsg(`Mensagem injetada! A IA identificou: "${analysisTitle}" e gerou uma pendência na aba Pendências.${mergeHint}`);
+        setPendingTraces([injectedTrace, ...pendingTraces.filter((t) => t.id !== injectedTrace.id)]);
+      } else if (data.action === 'merged' && injectedTrace) {
+        setSimSuccessMsg(`Mensagem mesclada ao contexto da pendência existente (${analysisTitle}).`);
+        setPendingTraces([injectedTrace, ...pendingTraces.filter((t) => t.id !== injectedTrace.id)]);
       } else {
         setSimSuccessMsg('Mensagem injetada. A IA interpretou que NÃO se trata de um problema de suporte de TI.');
       }
