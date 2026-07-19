@@ -2,25 +2,33 @@
  * Applies conversationId/memberIds columns on ExternalTrace if missing.
  * Safe to re-run (IF NOT EXISTS).
  */
-import { PrismaClient } from '@prisma/client';
+import dns from 'dns';
+import 'dotenv/config';
+import { Pool } from 'pg';
 
-const prisma = new PrismaClient();
+dns.setDefaultResultOrder('ipv4first');
 
-async function main() {
-  await prisma.$executeRawUnsafe(`
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 20000,
+});
+
+const client = await pool.connect();
+try {
+  await client.query(`
     ALTER TABLE "ticket_support"."ExternalTrace"
       ADD COLUMN IF NOT EXISTS "conversationId" TEXT
   `);
-  await prisma.$executeRawUnsafe(`
+  await client.query(`
     ALTER TABLE "ticket_support"."ExternalTrace"
       ADD COLUMN IF NOT EXISTS "memberIds" TEXT
   `);
-  await prisma.$executeRawUnsafe(`
+  await client.query(`
     CREATE INDEX IF NOT EXISTS "ExternalTrace_platform_conversationId_status_idx"
       ON "ticket_support"."ExternalTrace" ("platform", "conversationId", "status")
   `);
 
-  const cols = await prisma.$queryRawUnsafe(`
+  const { rows } = await client.query(`
     SELECT column_name, data_type, is_nullable
     FROM information_schema.columns
     WHERE table_schema = 'ticket_support'
@@ -29,14 +37,14 @@ async function main() {
     ORDER BY column_name
   `);
 
-  console.log('ExternalTrace grouping columns:', cols);
+  console.log('ExternalTrace grouping columns:', JSON.stringify(rows, null, 2));
+  if (rows.length < 2) {
+    console.error('FAILED: expected conversationId and memberIds');
+    process.exitCode = 1;
+  } else {
+    console.log('OK: grouping columns present');
+  }
+} finally {
+  client.release();
+  await pool.end();
 }
-
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
