@@ -24,7 +24,7 @@ export async function GET() {
         custom_ai_url: configMap['custom_ai_url'] || '',
         custom_ai_key: configMap['custom_ai_key'] || '',
         // Integration Config
-        monitored_accounts: configMap['monitored_accounts'] || 'caio.correia@groupabz.com',
+        monitored_accounts: configMap['monitored_accounts'] || 'user@example.com',
         sync_since_date: configMap['sync_since_date'] || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), // last 7 days default
         sync_interval_minutes: configMap['sync_interval_minutes'] || '30',
         exchange_enabled: configMap['exchange_enabled'] || 'true',
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       { key: 'gemini_api_key', value: gemini_api_key || '' },
       { key: 'custom_ai_url', value: custom_ai_url || '' },
       { key: 'custom_ai_key', value: custom_ai_key || '' },
-      { key: 'monitored_accounts', value: monitored_accounts || 'caio.correia@groupabz.com' },
+      { key: 'monitored_accounts', value: monitored_accounts || 'user@example.com' },
       { key: 'sync_since_date', value: sync_since_date || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) },
       { key: 'sync_interval_minutes', value: String(sync_interval_minutes || '30') },
       { key: 'exchange_enabled', value: String(exchange_enabled ?? 'true') },

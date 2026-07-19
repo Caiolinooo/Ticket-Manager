@@ -98,7 +98,7 @@ async function getIntegrationConfig(): Promise<{
     const map: Record<string, string> = {};
     configs.forEach(c => { map[c.key] = c.value; });
 
-    const accounts = (map['monitored_accounts'] || 'caio.correia@groupabz.com')
+    const accounts = (map['monitored_accounts'] || 'user@example.com')
       .split(',').map(e => e.trim()).filter(Boolean);
 
     const defaultSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -113,7 +113,7 @@ async function getIntegrationConfig(): Promise<{
   } catch (err) {
     console.error('[MS Graph] Error reading integration config from DB:', err);
     return {
-      monitoredAccounts: ['caio.correia@groupabz.com'],
+      monitoredAccounts: ['user@example.com'],
       syncSinceDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       teamsEnabled: true,
       exchangeEnabled: true,

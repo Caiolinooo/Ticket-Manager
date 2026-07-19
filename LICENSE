@@ -1,19 +1,17 @@
 # LICENÇA PROPRIETÁRIA / PROPRIETARY LICENSE
 
-Copyright © 2026 Caio Correia / Group ABZ.
+Copyright © 2026 Caio Correia.
 Todos os direitos reservados. / All rights reserved.
 
 ## Português
 
 Este software ("Ticket Manager") e todo o seu código-fonte, documentação, design,
-marca e artefatos associados são propriedade exclusiva do autor **Caio Correia**
-e da organização **Group ABZ**.
+marca e artefatos associados são propriedade exclusiva do autor **Caio Correia**.
 
 ### Uso permitido
 
 É permitido o uso interno deste software **somente** por pessoas e sistemas
-expressamente autorizados pelo autor e/ou pelo Group ABZ, no âmbito da operação
-do projeto Ticket Manager.
+expressamente autorizados pelo autor, no âmbito da operação do projeto Ticket Manager.
 
 ### Uso proibido (sem autorização escrita prévia)
 
@@ -34,30 +32,26 @@ Qualquer autorização deve ser concedida **por escrito** pelo autor.
 O software é fornecido "como está", sem garantias de qualquer espécie, expressas
 ou implícitas, incluindo, sem limitação, garantias de comercialização,
 adequação a um propósito específico ou não violação. Em nenhuma hipótese o
-autor ou o Group ABZ serão responsáveis por danos diretos, indiretos,
-incidentais ou consequenciais decorrentes do uso ou da impossibilidade de uso
-deste software.
+autor será responsável por danos diretos, indiretos, incidentais ou
+consequenciais decorrentes do uso ou da impossibilidade de uso deste software.
 
 ### Contato para autorização
 
 Para solicitar autorização de uso, redistribuição ou licenciamento comercial:
 
 - Autor: Caio Correia
-- Organização: Group ABZ
-- E-mail: caio.correia@groupabz.com
 
 ---
 
 ## English (summary)
 
-Copyright © 2026 Caio Correia / Group ABZ. All rights reserved.
+Copyright © 2026 Caio Correia. All rights reserved.
 
 This software is proprietary. Internal use is allowed only by parties expressly
-authorized by the author and/or Group ABZ for Ticket Manager operations.
+authorized by the author for Ticket Manager operations.
 
 Without prior written authorization from the author, you may not: copy,
 redistribute, sublicense, sell, commercially exploit, or reverse-engineer for
 commercial purposes this software or derivatives.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Contact for
-authorization: caio.correia@groupabz.com.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

@@ -1,9 +1,9 @@
 {
   "name": "ticket-manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "author": "Caio Correia / Group ABZ",
+  "author": "Caio Correia",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

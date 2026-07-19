@@ -55,11 +55,15 @@ Atualizado: 2026-07-19
 - [x] Commit inicial/principal v1.0.0
 - [x] Tag `v1.0.0`
 - [x] Repo remoto GitHub **privado** + push branch + tag
+- [x] Bump patch `1.0.1` + limpeza de branding organizacional
+- [x] Tag `v1.0.1` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
 - [x] `package.json` → `"license": "SEE LICENSE IN LICENSE"`
 - [x] `README.md` completo (stack, env, Azure, SystemConfig, IA, deploy, troubleshooting)
+- [x] Remover referências de branding organizacional (autor = Caio Correia apenas)
+- [x] Defaults de demo com placeholders (`user@example.com`), não e-mails de organização
 
 ### 3.3 Tasks
 - [x] Subdividir `tasks.md` em checklist com status
@@ -74,15 +78,26 @@ Atualizado: 2026-07-19
 - [x] `npx prisma generate`
 - [x] `npm run build`
 - [x] `pm2 restart ticket-manager`
+- [x] Redeploy pós-limpeza de branding (v1.0.1)
 
 ### 4.2 Smoke
 - [x] App respondendo na porta **9120** (`/` e `/admin` → HTTP 200)
-- [x] PM2 `ticket-manager` online com `ticket-manager@1.0.0`
+- [x] PM2 `ticket-manager` online
 - [ ] (Opcional) Smoke sync Teams/Exchange pós-deploy e checar logs AI
 
 ---
 
-## 5. Próximos passos (backlog)
+## 5. Branding / autoria (concluído)
+
+- [x] Remover branding organizacional de LICENSE, README, package.json, UI, seeds, defaults e export
+- [x] Copyright e author somente **Caio Correia**
+- [x] Fallbacks de contas monitoradas → `user@example.com` (config real permanece no banco/Admin)
+- [x] Filename de export Excel sem prefixo organizacional
+- [x] Docs de deploy sem enfatizar marca de host (descrever como servidor Linux)
+
+---
+
+## 6. Próximos passos (backlog)
 
 - [ ] Agendar sync periódico (cron/PM2 ou job interno) usando `sync_interval_minutes`
 - [ ] Hardening auth Admin (sessão/roles) se ainda houver gaps
@@ -96,9 +111,9 @@ Atualizado: 2026-07-19
 
 | Item | Valor |
 |------|-------|
-| Host | `vm.groupabz.com` |
+| Host | servidor Linux do mantenedor |
 | User | `caio` |
 | Path | `/home/caio/ticket-manager` |
 | PM2 | `ticket-manager` |
 | Porta | `9120` |
-| Contas monitoradas | `caio.correia@groupabz.com`, `suporte@groupabz.com` |
+| Contas monitoradas | configurar no Admin (`monitored_accounts`) — ex. placeholder `user@example.com` |

@@ -332,7 +332,7 @@ export async function GET(request: Request) {
       dateFrom && dateTo
         ? `_${dateFrom.replace(/-/g, '')}_a_${dateTo.replace(/-/g, '')}`
         : '';
-    const filename = `ABZGroup_Chamados_TI${periodSuffix}_${today}.xlsx`;
+    const filename = `TicketManager_Chamados${periodSuffix}_${today}.xlsx`;
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 

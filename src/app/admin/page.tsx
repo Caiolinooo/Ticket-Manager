@@ -122,7 +122,7 @@ export default function AdminDashboard() {
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [customAiUrl, setCustomAiUrl] = useState('');
   const [customAiKey, setCustomAiKey] = useState('');
-  const [monitoredAccounts, setMonitoredAccounts] = useState('caio.correia@groupabz.com');
+  const [monitoredAccounts, setMonitoredAccounts] = useState('user@example.com');
   const [syncSinceDate, setSyncSinceDate] = useState('');
   const [syncIntervalMinutes, setSyncIntervalMinutes] = useState('30');
   const [exchangeEnabled, setExchangeEnabled] = useState(true);
@@ -231,7 +231,7 @@ export default function AdminDashboard() {
         setGeminiApiKey(data.settings.gemini_api_key);
         setCustomAiUrl(data.settings.custom_ai_url);
         setCustomAiKey(data.settings.custom_ai_key);
-        setMonitoredAccounts(data.settings.monitored_accounts || 'caio.correia@groupabz.com');
+        setMonitoredAccounts(data.settings.monitored_accounts || 'user@example.com');
         setSyncSinceDate(data.settings.sync_since_date || '');
         setSyncIntervalMinutes(data.settings.sync_interval_minutes || '30');
         setExchangeEnabled(data.settings.exchange_enabled !== 'false');
@@ -1725,7 +1725,7 @@ export default function AdminDashboard() {
                         value={monitoredAccounts}
                         onChange={(e) => setMonitoredAccounts(e.target.value)}
                         className="block w-full px-4 py-2.5 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-xs"
-                        placeholder="caio.correia@groupabz.com, ti@groupabz.com"
+                        placeholder="user@example.com, support@example.com"
                         required
                       />
                       <p className="text-[10px] text-slate-500 mt-1">

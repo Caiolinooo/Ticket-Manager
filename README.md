@@ -2,8 +2,8 @@
 
 Sistema de gestão de tickets de suporte que coleta mensagens de **Microsoft Exchange (e-mail)** e **Microsoft Teams** via Microsoft Graph, tria com IA e organiza o fluxo de aprovação/atendimento.
 
-**Versão:** 1.0.0  
-**Autor:** Caio Correia / Group ABZ  
+**Versão:** 1.0.1  
+**Autor:** Caio Correia  
 **Licença:** Proprietária — ver [LICENSE](./LICENSE)
 
 ---
@@ -110,10 +110,12 @@ Chaves relevantes gerenciadas pela UI Admin / API `/api/settings`:
 | `custom_ai_url` / `custom_ai_key` | Fallback OpenAI-compatible |
 | `sync_interval_minutes` | Reservado (sync atual é on-demand) |
 
-Exemplo típico Group ABZ:
+Exemplo de configuração (placeholders — configure os UPNs reais no Admin / SystemConfig):
 
-- `monitored_accounts` = `caio.correia@groupabz.com, suporte@groupabz.com`
+- `monitored_accounts` = `user@example.com, support@example.com`
 - `teams_enabled` / `exchange_enabled` = `true`
+
+Os defaults de código usam `user@example.com` apenas como fallback de demo. Em produção, defina as contas reais via Admin UI (elas ficam no banco e **não** são sobrescritas pelo deploy).
 
 ---
 
@@ -145,11 +147,11 @@ Respostas incluem contagens e, em falha Graph, `errors` / `warnings`.
 
 ## Deploy no servidor (PM2)
 
-Ambiente típico Group ABZ:
+Ambiente de produção típico (servidor Linux):
 
 | Item | Valor |
 |------|-------|
-| Host | `vm.groupabz.com` |
+| Host | servidor Linux do mantenedor |
 | Path | `/home/caio/ticket-manager` |
 | Processo PM2 | `ticket-manager` |
 | Porta | `9120` |
@@ -159,8 +161,10 @@ Sync de código (exemplo com rsync, **preservando** `.env` do servidor):
 ```bash
 rsync -avz --delete \
   --exclude node_modules --exclude .next --exclude .env --exclude .git \
-  ./ caio@vm.groupabz.com:/home/caio/ticket-manager/
+  ./ USER@HOST:/home/caio/ticket-manager/
 ```
+
+Substitua `USER@HOST` pelo usuário e hostname SSH do seu servidor.
 
 No servidor:
 
@@ -205,10 +209,9 @@ tasks.md                   # Checklist de alto nível
 
 ## Licença
 
-Software **proprietário**. Cópia, redistribuição, venda e uso comercial sem autorização escrita do autor são proibidos. Uso interno apenas por autorizados / Group ABZ.
+Software **proprietário**. Cópia, redistribuição, venda e uso comercial sem autorização escrita do autor (**Caio Correia**) são proibidos. Uso interno apenas por pessoas autorizadas pelo autor.
 
-Detalhes: [LICENSE](./LICENSE)  
-Contato: caio.correia@groupabz.com
+Detalhes: [LICENSE](./LICENSE)
 
 ---
 
@@ -233,6 +236,6 @@ pm2 logs ticket-manager --lines 100
 
 ## Versionamento
 
-- Semântico em `package.json` (`1.0.0`)
-- Tags Git: `v1.0.0`, …
+- Semântico em `package.json` (`1.0.1`)
+- Tags Git: `v1.0.1`, …
 - Repositório privado no GitHub (conta do mantenedor)
