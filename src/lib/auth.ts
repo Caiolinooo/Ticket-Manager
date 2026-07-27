@@ -96,24 +96,6 @@ export function verifySessionToken(token: string): SessionUser | null {
   }
 }
 
-/** Legacy base64 JSON session (pre-1.2.0) — accepted once, then re-signed on write paths. */
-function parseLegacySession(raw: string): SessionUser | null {
-  try {
-    const decoded = Buffer.from(raw, 'base64').toString('utf-8');
-    const data = JSON.parse(decoded) as SessionUser;
-    if (!data?.id || !data?.email || !data?.role) return null;
-    return {
-      id: data.id,
-      name: data.name,
-      email: data.email,
-      role: data.role,
-      authSource: 'local',
-    };
-  } catch {
-    return null;
-  }
-}
-
 export async function getSession(): Promise<SessionUser | null> {
   try {
     const cookieStore = await cookies();
@@ -123,10 +105,9 @@ export async function getSession(): Promise<SessionUser | null> {
       return null;
     }
 
-    const jwtSession = verifySessionToken(sessionCookie.value);
-    if (jwtSession) return jwtSession;
-
-    return parseLegacySession(sessionCookie.value);
+    // Only accept HMAC-signed JWT sessions. Pre-1.2.0 unsigned base64 JSON
+    // cookies are forgeable (attacker can mint role=ADMIN) and must be rejected.
+    return verifySessionToken(sessionCookie.value);
   } catch {
     return null;
   }
