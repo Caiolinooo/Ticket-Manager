@@ -1,11 +1,27 @@
 # Ticket-Manager — Tarefas de alto nível
 
-Atualizado: 2026-07-19
+Atualizado: 2026-07-27
 
 ## Legenda
 
 - `[x]` feito
 - `[ ]` pendente
+
+---
+
+## 0c. Hotfix — session forgery via unsigned legacy cookie
+
+### Causa
+- `getSession()` aceitava fallback `parseLegacySession` (base64 JSON sem assinatura).
+- Qualquer cliente podia forjar `session=<base64({"id","email","role":"ADMIN"})>` e passar em `/api/settings`, `/api/users`, tickets, etc.
+
+### Fix
+- [x] Remover aceite de sessão legacy unsigned; só JWT HMAC (`verifySessionToken`)
+- [x] Smoke `scripts/smoke-reject-forged-session.mjs`
+
+### Evidência
+- Cookie base64 forjado → `verifySessionToken` null / `/api/auth/me` 401
+- JWT assinado válido continua aceito
 
 ---
 
