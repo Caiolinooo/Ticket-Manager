@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
+import { canAccessOperatorArea } from '@/lib/permissions';
 import * as XLSX from 'xlsx';
 
 // Priority labels PT-BR
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
   try {
     const session = await getSession();
 
-    if (!session || (session.role !== 'ADMIN' && session.role !== 'AGENT')) {
+    if (!canAccessOperatorArea(session)) {
       return new Response('Acesso negado', { status: 403 });
     }
 
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
       dateFilter.lte = new Date(dateTo + 'T23:59:59Z');
     }
 
-    // Fetch tickets (filtered by date range if provided)
+    // Fetch ALL sector tickets (unified KPIs) — date filter only, never by technician mailbox
     const tickets = await prisma.ticket.findMany({
       where: Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : undefined,
       include: {

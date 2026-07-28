@@ -9,9 +9,16 @@ import {
   GROUP_WINDOW_MS,
 } from '@/lib/trace-grouping';
 import type { MicrosoftMessage } from '@/lib/microsoft';
+import { getSession } from '@/lib/auth';
+import { canSyncMicrosoft } from '@/lib/permissions';
 
 export async function GET() {
   try {
+    const session = await getSession();
+    if (!canSyncMicrosoft(session)) {
+      return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
+    }
+
     const collection = await fetchExchangeEmails();
     const batch = await processMessageBatch(collection.messages);
 
@@ -51,6 +58,11 @@ export async function GET() {
 // Post endpoint for injecting custom Exchange emails from Simulator
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!canSyncMicrosoft(session)) {
+      return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
+    }
+
     const body = await request.json();
     const { senderName, senderEmail, content, subject } = body;
 
@@ -74,6 +86,7 @@ export async function POST(request: Request) {
       conversationId:
         body.conversationId ||
         `email:${senderEmail.toLowerCase()}:${normalizedSubject || '(sem-assunto)'}`,
+      accountUpn: String(body.accountUpn || '').trim().toLowerCase(),
     };
 
     const result = await upsertGroupedTrace(clusterMessages([msg])[0]);

@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { KeyRound, Mail, ShieldAlert, Cpu, CheckCircle } from 'lucide-react';
 
 function redirectForRole(role: string, router: ReturnType<typeof useRouter>) {
-  if (role === 'ADMIN' || role === 'AGENT') {
+  const r = (role || '').toUpperCase();
+  if (r === 'ADMIN' || r === 'TECHNICIAN' || r === 'AGENT') {
     router.push('/admin');
   } else {
     router.push('/client');

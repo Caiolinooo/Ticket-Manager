@@ -204,7 +204,9 @@ export async function ensureEmployeeFromPortal(user: PortalUser) {
     where: { email: { equals: email, mode: 'insensitive' } },
   });
   if (existing) {
-    if (existing.role === 'ADMIN' || existing.role === 'AGENT') {
+    // Do not downgrade local operators (ADMIN / TECHNICIAN / legacy AGENT) to EMPLOYEE.
+    const op = (existing.role || '').toUpperCase();
+    if (op === 'ADMIN' || op === 'TECHNICIAN' || op === 'AGENT') {
       return existing;
     }
     if (existing.name !== name) {

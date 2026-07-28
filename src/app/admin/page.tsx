@@ -13,7 +13,6 @@ import {
   canAccessOperatorArea,
   canManageSettings,
   canSyncMicrosoft,
-  isAdminRole,
   roleDisplayLabel,
 } from '@/lib/permissions';
 import { RoleBadge } from '@/components/permission-gates';
@@ -109,6 +108,8 @@ export default function AdminDashboard() {
   
   const [user, setUser] = useState<UserInfo | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  /** Sector-wide tickets for KPI/dashboard — never filtered by technician mailbox */
+  const [sectorTickets, setSectorTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [agents, setAgents] = useState<UserInfo[]>([]);
   const [pendingTraces, setPendingTraces] = useState<ExternalTrace[]>([]);
@@ -201,10 +202,11 @@ export default function AdminDashboard() {
     }
   }, [kpiPreset, kpiDateFrom, kpiDateTo]);
 
-  // Tickets filtered by KPI date range
+  // KPI always uses sector-wide tickets (unified for ADMIN and TECHNICIAN)
   const kpiTickets = useMemo(() => {
-    if (!effectiveDates.from && !effectiveDates.to) return tickets;
-    return tickets.filter(t => {
+    const source = sectorTickets.length > 0 ? sectorTickets : tickets;
+    if (!effectiveDates.from && !effectiveDates.to) return source;
+    return source.filter(t => {
       const created = new Date(t.createdAt);
       const from = effectiveDates.from ? new Date(effectiveDates.from + 'T00:00:00') : null;
       const to = effectiveDates.to ? new Date(effectiveDates.to + 'T23:59:59') : null;
@@ -212,7 +214,7 @@ export default function AdminDashboard() {
       if (to && created > to) return false;
       return true;
     });
-  }, [tickets, effectiveDates]);
+  }, [sectorTickets, tickets, effectiveDates]);
 
   // KPI calculations (based on filtered tickets)
   const totalTicketsCount = kpiTickets.length;
@@ -435,7 +437,7 @@ export default function AdminDashboard() {
         const userRes = await fetch('/api/auth/me', { credentials: 'include' });
         if (!userRes.ok) { router.replace('/'); return; }
         const userData = await userRes.json();
-        if (userData.user.role !== 'ADMIN' && userData.user.role !== 'AGENT') {
+        if (!canAccessOperatorArea(userData.user)) {
           router.replace('/client'); return;
         }
         setUser(userData.user);
@@ -443,7 +445,14 @@ export default function AdminDashboard() {
         const ticketsRes = await fetch('/api/tickets', { credentials: 'include' });
         if (ticketsRes.ok) {
           const ticketsData = await ticketsRes.json();
-          setTickets(ticketsData.tickets);
+          setTickets(ticketsData.tickets || []);
+        }
+
+        // Unified sector KPIs — same totals for ADMIN and TECHNICIAN
+        const kpiRes = await fetch('/api/kpi', { credentials: 'include' });
+        if (kpiRes.ok) {
+          const kpiData = await kpiRes.json();
+          setSectorTickets(kpiData.tickets || []);
         }
 
         const agentsRes = await fetch('/api/users', { credentials: 'include' });
@@ -458,8 +467,8 @@ export default function AdminDashboard() {
           setPendingTraces(tracesData.pendingTraces);
         }
 
-        await loadSettings();
-        if (userData.user.role === 'ADMIN') {
+        if (canManageSettings(userData.user)) {
+          await loadSettings();
           await loadTechnicians();
         }
       } catch (err) {
@@ -856,7 +865,7 @@ export default function AdminDashboard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              Ticket-Manager <span className="text-indigo-400 text-xs px-2 py-0.5 rounded bg-indigo-500/10 font-bold border border-indigo-500/20">ADMIN</span>
+              Ticket-Manager <RoleBadge role={user?.role} />
             </h1>
             <p className="text-[10px] text-slate-400">Plataforma Inteligente · Teams & Exchange</p>
           </div>
@@ -875,6 +884,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {canSyncMicrosoft(user) && (
           <button
             onClick={handleSyncMicrosoft}
             disabled={syncing}
@@ -884,6 +894,7 @@ export default function AdminDashboard() {
             <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Sincronizando...' : 'Verificar Canais'}
           </button>
+          )}
           
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-xs shadow ring-1 ring-white/10">
@@ -891,7 +902,7 @@ export default function AdminDashboard() {
             </div>
             <div className="text-left hidden sm:block">
               <p className="text-xs font-semibold text-slate-200">{user?.name}</p>
-              <p className="text-[10px] text-slate-500">{user?.role === 'ADMIN' ? 'Administrador' : 'Técnico de TI'}</p>
+              <p className="text-[10px] text-slate-500">{roleDisplayLabel(user?.role)}</p>
             </div>
           </div>
           <button
@@ -913,9 +924,9 @@ export default function AdminDashboard() {
               { tab: 'tickets', icon: MessageSquare, label: 'Fila de Tickets', badge: tickets.filter(t => t.status === 'OPEN').length },
               { tab: 'pending', icon: MessageSquareWarning, label: 'Pendências', badge: pendingTraces.length, badgeColor: 'red' },
               { tab: 'kpis', icon: BarChart3, label: 'Relatórios & KPIs' },
-              { tab: 'simulator', icon: Zap, label: 'Simulador' },
-              { tab: 'settings', icon: Settings2, label: 'Configurações' },
-            ].map(({ tab, icon: Icon, label, badge, badgeColor }) => (
+              ...(canSyncMicrosoft(user) ? [{ tab: 'simulator', icon: Zap, label: 'Simulador' }] : []),
+              ...(canManageSettings(user) ? [{ tab: 'settings', icon: Settings2, label: 'Configurações' }] : []),
+            ].map(({ tab, icon: Icon, label, badge, badgeColor }: any) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab as any)}
@@ -960,9 +971,9 @@ export default function AdminDashboard() {
             { tab: 'tickets', icon: MessageSquare, label: 'Tickets' },
             { tab: 'pending', icon: MessageSquareWarning, label: 'Pendências', hasDot: pendingTraces.length > 0 },
             { tab: 'kpis', icon: BarChart3, label: 'KPIs' },
-            { tab: 'simulator', icon: Zap, label: 'Simulador' },
-            { tab: 'settings', icon: Settings2, label: 'Config' },
-          ].map(({ tab, icon: Icon, label, hasDot }) => (
+            ...(canSyncMicrosoft(user) ? [{ tab: 'simulator', icon: Zap, label: 'Simulador' }] : []),
+            ...(canManageSettings(user) ? [{ tab: 'settings', icon: Settings2, label: 'Config' }] : []),
+          ].map(({ tab, icon: Icon, label, hasDot }: any) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -1114,7 +1125,10 @@ export default function AdminDashboard() {
 
                         {selectedTicket.messages && selectedTicket.messages.map((msg) => {
                           const isOwnMessage = msg.senderId === user?.id;
-                          const isAgent = msg.sender.role === 'ADMIN' || msg.sender.role === 'AGENT';
+                          const isAgent =
+                            msg.sender.role === 'ADMIN' ||
+                            msg.sender.role === 'AGENT' ||
+                            msg.sender.role === 'TECHNICIAN';
                           
                           return (
                             <div key={msg.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
@@ -1284,6 +1298,7 @@ export default function AdminDashboard() {
                     Comunicações identificadas pela IA como chamados técnicos não abertos formalmente.
                   </p>
                 </div>
+                {canSyncMicrosoft(user) && (
                 <button
                   onClick={handleSyncMicrosoft}
                   disabled={syncing}
@@ -1292,6 +1307,7 @@ export default function AdminDashboard() {
                   <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
                   {syncing ? 'Sincronizando...' : 'Varrer Mensagens'}
                 </button>
+                )}
               </div>
 
               {syncResult && (
@@ -1380,7 +1396,7 @@ export default function AdminDashboard() {
                     <BarChart3 className="h-5 w-5 text-indigo-500" /> Relatórios de Suporte e KPIs
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Monitore eficiência operacional, SLAs e MTTR. Filtre por período e exporte em Excel.
+                    Totais unificados do setor (iguais para Admin e Técnico). Filtre por período e exporte em Excel.
                   </p>
                 </div>
 

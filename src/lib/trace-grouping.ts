@@ -14,6 +14,7 @@ export interface MessageCluster {
   senderName: string;
   senderEmail: string;
   channelOrSubject: string;
+  accountUpn: string;
   messages: MicrosoftMessage[];
   firstAt: Date;
   lastAt: Date;
@@ -104,6 +105,7 @@ export function clusterMessages(messages: MicrosoftMessage[]): MessageCluster[] 
         senderName: msg.senderName,
         senderEmail: msg.senderEmail,
         channelOrSubject: msg.subjectOrChannel,
+        accountUpn: (msg.accountUpn || '').trim().toLowerCase(),
         messages: [msg],
         firstAt: msg.receivedDateTime,
         lastAt: msg.receivedDateTime,
@@ -237,6 +239,9 @@ export async function upsertGroupedTrace(cluster: MessageCluster): Promise<Upser
         receivedAt: cluster.lastAt > existingPending.receivedAt ? cluster.lastAt : existingPending.receivedAt,
         channelOrSubject: cluster.channelOrSubject || undefined,
         status: 'PENDING_APPROVAL',
+        ...(cluster.accountUpn
+          ? { accountUpn: cluster.accountUpn }
+          : {}),
       },
     });
 
@@ -271,6 +276,7 @@ export async function upsertGroupedTrace(cluster: MessageCluster): Promise<Upser
       rawContent: groupedContent,
       status: analysis.isIssue ? 'PENDING_APPROVAL' : 'IGNORED',
       receivedAt: cluster.lastAt,
+      accountUpn: cluster.accountUpn || null,
     },
   });
 
@@ -312,6 +318,7 @@ function mergeContents(
       receivedDateTime: new Date(0),
       platform: 'TEAMS',
       conversationId: '',
+      accountUpn: '',
     },
     ...newMessages,
   ];

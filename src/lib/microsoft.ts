@@ -1,5 +1,6 @@
 import dns from 'dns';
 import { prisma } from './db';
+import { getSyncAccountUnion } from './technician-routing';
 
 // Force DNS resolution to prefer IPv4 over IPv6 to prevent ENETUNREACH errors on servers without IPv6 routing.
 dns.setDefaultResultOrder('ipv4first');
@@ -16,6 +17,8 @@ export interface MicrosoftMessage {
   platform: 'TEAMS' | 'EXCHANGE';
   /** Teams chatId / channel thread key; Exchange uses sender+subject key */
   conversationId: string;
+  /** Monitored mailbox UPN that received this message (routing) */
+  accountUpn: string;
 }
 
 export interface CollectionResult {
@@ -87,6 +90,8 @@ async function getAccessToken(): Promise<string | null> {
 
 async function getIntegrationConfig(): Promise<{
   monitoredAccounts: string[];
+  exchangeAccounts: string[];
+  teamsAccounts: string[];
   syncSinceDate: string;
   teamsEnabled: boolean;
   exchangeEnabled: boolean;
@@ -100,14 +105,16 @@ async function getIntegrationConfig(): Promise<{
     const map: Record<string, string> = {};
     configs.forEach(c => { map[c.key] = c.value; });
 
-    const accounts = (map['monitored_accounts'] || 'user@example.com')
-      .split(',').map(e => e.trim()).filter(Boolean);
-
     const defaultSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const syncSinceDate = map['sync_since_date'] || defaultSince;
 
+    // Sector-wide sync: admin global ∪ all active technicians' mailboxes/Teams
+    const union = await getSyncAccountUnion();
+
     return {
-      monitoredAccounts: accounts,
+      monitoredAccounts: union.allAccounts,
+      exchangeAccounts: union.exchangeAccounts,
+      teamsAccounts: union.teamsAccounts,
       syncSinceDate,
       teamsEnabled: map['teams_enabled'] !== 'false',
       exchangeEnabled: map['exchange_enabled'] !== 'false',
@@ -116,6 +123,8 @@ async function getIntegrationConfig(): Promise<{
     console.error('[MS Graph] Error reading integration config from DB:', err);
     return {
       monitoredAccounts: ['user@example.com'],
+      exchangeAccounts: ['user@example.com'],
+      teamsAccounts: ['user@example.com'],
       syncSinceDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
       teamsEnabled: true,
       exchangeEnabled: true,
@@ -245,6 +254,7 @@ async function fetchTeamsChats(
         receivedDateTime: msgCreated,
         platform: 'TEAMS',
         conversationId: `teams-chat:${chat.id}`,
+        accountUpn: targetUser.trim().toLowerCase(),
       });
     }
   }
@@ -320,6 +330,7 @@ async function fetchTeamsChannelMessages(
           receivedDateTime: msgCreated,
           platform: 'TEAMS',
           conversationId: `teams-channel:${team.id}:${channel.id}`,
+          accountUpn: targetUser.trim().toLowerCase(),
         });
       }
     }
@@ -359,13 +370,14 @@ export async function fetchTeamsMessages(): Promise<CollectionResult> {
 
   const sinceCutoff = new Date(config.syncSinceDate + 'T00:00:00Z');
   console.log(`[Teams] Sync cutoff: ${sinceCutoff.toISOString()}`);
+  console.log(`[Teams] Sync accounts (union): ${config.teamsAccounts.join(', ') || '(none)'}`);
 
   const allMessages: MicrosoftMessage[] = [];
   const seenIds = new Set<string>();
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  for (const targetUser of config.monitoredAccounts) {
+  for (const targetUser of config.teamsAccounts) {
     try {
       const chatMsgs = await fetchTeamsChats(targetUser, token, sinceCutoff);
       console.log(`[Teams/Chats] ${chatMsgs.length} message(s) from chats of ${targetUser}`);
@@ -413,7 +425,7 @@ export async function fetchTeamsMessages(): Promise<CollectionResult> {
     messages: allMessages,
     authOk: true,
     disabled: false,
-    monitoredAccounts: config.monitoredAccounts,
+    monitoredAccounts: config.teamsAccounts,
     warnings,
     errors,
   };
@@ -453,7 +465,9 @@ export async function fetchExchangeEmails(): Promise<CollectionResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  for (const targetUser of config.monitoredAccounts) {
+  console.log(`[Exchange] Sync accounts (union): ${config.exchangeAccounts.join(', ') || '(none)'}`);
+
+  for (const targetUser of config.exchangeAccounts) {
     try {
       console.log(`[Exchange] Syncing for: ${targetUser} since ${sinceDateTime}`);
 
@@ -504,6 +518,7 @@ export async function fetchExchangeEmails(): Promise<CollectionResult> {
           receivedDateTime: new Date(msg.receivedDateTime || Date.now()),
           platform: 'EXCHANGE',
           conversationId: `email:${senderEmail.toLowerCase()}:${normalizedSubject || '(sem-assunto)'}`,
+          accountUpn: targetUser.trim().toLowerCase(),
         });
       }
     } catch (err) {
@@ -522,7 +537,7 @@ export async function fetchExchangeEmails(): Promise<CollectionResult> {
     messages: emails,
     authOk: true,
     disabled: false,
-    monitoredAccounts: config.monitoredAccounts,
+    monitoredAccounts: config.exchangeAccounts,
     warnings,
     errors,
   };

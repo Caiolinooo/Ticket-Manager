@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { suggestDirectFix } from '@/lib/ai';
 import { getSession } from '@/lib/auth';
+import { canAccessOperatorArea } from '@/lib/permissions';
 
 export async function POST(request: Request) {
   try {
     const session = await getSession();
 
-    if (!session || (session.role !== 'ADMIN' && session.role !== 'AGENT')) {
+    if (!canAccessOperatorArea(session)) {
       return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
     }
 

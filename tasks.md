@@ -57,16 +57,22 @@ Atualizado: 2026-07-28
 - [x] API `/api/settings/technicians` (+ `[id]`) com validação de e-mail
 - [x] UI Admin → Configurações → seção **Técnicos** (CRUD / ativar-desativar)
 - [x] Aplicar colunas no DB (local + server compartilham Supabase)
-- [ ] Login operador aceitar `TECHNICIAN` (mínimo — se ainda não feito por Auth/Routing)
+- [x] Login operador aceitar `TECHNICIAN` (Auth + Routing)
 - [x] Commit `feat(technicians): schema and settings UI`
 
-### 9.2 Routing (outro agente) — NÃO Foundation
-- [ ] Filtrar pendências / sync / assign por `monitoredEmails`, `monitoredTeamsAccounts`, `receiveMode`
-- [ ] Não alterar schema de técnicos além do contrato acima
+### 9.2 Routing + KPI unificado (v1.3.0)
+- [x] `accountUpn` em `ExternalTrace` + `Ticket` (migration + script)
+- [x] Sync Graph: união `monitored_accounts` admin ∪ emails/Teams de técnicos ativos
+- [x] Stamp `accountUpn` na coleta + grouping + approve
+- [x] Filtro pendências/tickets por `receiveMode` (OWN_ONLY / SHARED_WITH_ADMIN)
+- [x] KPI `/api/kpi` + export: **sempre setor inteiro** (ADMIN ≡ TECHNICIAN)
+- [x] Auth matrix: `permissions.ts`, gates, login TECHNICIAN
+- [x] Smoke `scripts/smoke-technician-routing.mjs` (+ auth smoke)
+- [x] Bump `1.3.0` + tag + deploy
 
-### 9.3 Auth / UX operadores (backlog relacionado)
-- [ ] Tratar `TECHNICIAN` como operador no login (`area=admin`) e guards de API que hoje só checam ADMIN/AGENT
-- [ ] Incluir TECHNICIAN em listas de assignee (`/api/users`) se desejado
+### 9.3 Auth / UX operadores
+- [x] Tratar `TECHNICIAN` como operador no login (`area=admin`) e guards de API
+- [x] Incluir TECHNICIAN em listas de assignee (`/api/users`)
 
 ---
 
@@ -170,6 +176,8 @@ Atualizado: 2026-07-28
 - [x] Tag `v1.2.1` + push
 - [x] Patch `1.2.2` — cookie session sem Secure em HTTP (login loop)
 - [x] Tag `v1.2.2` + push
+- [x] Bump minor `1.3.0` — técnicos: routing + KPI unificado
+- [x] Tag `v1.3.0` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -270,6 +278,33 @@ Atualizado: 2026-07-28
 
 ---
 
+## 9b. Técnicos — login operador + permissões (AUTH) — integrado em 1.3.0
+
+### Objetivo
+- [x] Role `TECHNICIAN` (SupportUser) — login pela aba **Operador**
+- [x] JWT/cookie claims com `role: TECHNICIAN | ADMIN` (AGENT = alias legado)
+- [x] Matriz: TECHNICIAN vê/atualiza tickets e pendências; **não** settings, CRUD técnicos, sync Graph
+- [x] Hooks `canAccessTicket` / routing por mailbox (`receiveMode`)
+- [x] Guards em `/admin`, tickets, approve/ignore, settings, sync
+- [x] Smoke `scripts/smoke-technician-auth.mjs`
+- [x] Deploy / version bump via release Routing 1.3.0
+
+### Matriz ADMIN vs TECHNICIAN
+
+| Capacidade | ADMIN | TECHNICIAN |
+|------------|:-----:|:----------:|
+| Login operador (`area=admin`) | sim | sim |
+| Fila de tickets / update / mensagens | sim | sim* |
+| Pendências approve/ignore | sim | sim* |
+| KPIs / export | sim | sim (setor unificado) |
+| Configurações de sistema | sim | não |
+| CRUD de técnicos | sim | não |
+| Sync Microsoft (Teams/Exchange) | sim | não |
+
+\* filtrado por `receiveMode` + `accountUpn`: `OWN_ONLY` = contas do técnico; `SHARED_WITH_ADMIN` = contas dele ∪ admin
+
+---
+
 ## 6. Próximos passos (backlog)
 
 - [ ] Agendar sync periódico (cron/PM2 ou job interno) usando `sync_interval_minutes`
@@ -278,7 +313,6 @@ Atualizado: 2026-07-28
 - [ ] Documentar runbook de rotação de `MS_GRAPH_CLIENT_SECRET` e Gemini key
 - [ ] Testes E2E (Playwright) para login Admin + sync + approve
 - [ ] (Opcional) Anexar follow-up a Ticket OPEN existente (além de PENDING ExternalTrace)
-- [ ] Feature Técnicos: routing de pendências + login TECHNICIAN (ver §9)
 
 ---
 
@@ -293,3 +327,4 @@ Atualizado: 2026-07-28
 | Porta | `9120` |
 | Contas monitoradas | configurar no Admin (`monitored_accounts`) — ex. placeholder `user@example.com` |
 | Técnicos | Admin → Configurações → Técnicos (`SupportUser` role `TECHNICIAN`) |
+| KPI | sempre agregação do setor (`/api/kpi`, export) — não silos por técnico |

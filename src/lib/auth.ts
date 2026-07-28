@@ -1,11 +1,15 @@
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
+import type { SupportRole } from '@/lib/permissions';
+
+export type { SupportRole };
 
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
-  role: string;
+  /** ADMIN | TECHNICIAN | EMPLOYEE (AGENT = legacy technician alias) */
+  role: SupportRole | string;
   authSource?: 'local' | 'portal';
   portalUserId?: string;
 }

@@ -1,6 +1,19 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
+import { isEmployeeRole, isOperatorRole, isAdminRole, isTechnicianRole } from '@/lib/permissions';
+import {
+  getTechnicianProfile,
+  getVisibleAccountUpnsForUser,
+  ticketWhereForAccounts,
+} from '@/lib/technician-routing';
+
+const ticketInclude = {
+  creator: { select: { id: true, name: true, email: true } },
+  assignee: { select: { id: true, name: true, email: true } },
+  messages: { orderBy: { createdAt: 'asc' as const } },
+  externalTraces: true,
+};
 
 export async function GET() {
   try {
@@ -10,15 +23,15 @@ export async function GET() {
       return NextResponse.json({ success: false, error: 'Não autorizado' }, { status: 401 });
     }
 
-    let tickets;
-
-    if (session.role === 'EMPLOYEE') {
-      // Employee can only see their own tickets — but we must verify they exist in DB
+    if (isEmployeeRole(session.role)) {
       const dbUser = await prisma.supportUser.findUnique({ where: { id: session.id } });
       if (!dbUser) {
-        return NextResponse.json({ success: false, error: 'Sessão inválida. Por favor, faça login novamente.' }, { status: 401 });
+        return NextResponse.json(
+          { success: false, error: 'Sessão inválida. Por favor, faça login novamente.' },
+          { status: 401 }
+        );
       }
-      tickets = await prisma.ticket.findMany({
+      const tickets = await prisma.ticket.findMany({
         where: { createdById: session.id },
         include: {
           creator: { select: { id: true, name: true, email: true } },
@@ -27,23 +40,36 @@ export async function GET() {
         },
         orderBy: { createdAt: 'desc' },
       });
-    } else {
-      // ADMIN or AGENT
-      tickets = await prisma.ticket.findMany({
-        include: {
-          creator: { select: { id: true, name: true, email: true } },
-          assignee: { select: { id: true, name: true, email: true } },
-          messages: { orderBy: { createdAt: 'asc' } },
-          externalTraces: true,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      return NextResponse.json({ success: true, tickets, scope: 'own' });
     }
 
-    return NextResponse.json({ success: true, tickets });
-  } catch (error: any) {
+    if (!isOperatorRole(session.role)) {
+      return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
+    }
+
+    // Work queue: ADMIN sees all; TECHNICIAN filtered by receiveMode + accounts
+    let where: Record<string, unknown> = {};
+    let scope: 'sector' | 'routed' = 'sector';
+
+    if (isTechnicianRole(session.role) && !isAdminRole(session.role)) {
+      const profile = await getTechnicianProfile(session.id);
+      const visible = await getVisibleAccountUpnsForUser(session);
+      const mode = profile?.receiveMode || 'SHARED_WITH_ADMIN';
+      where = ticketWhereForAccounts(visible, mode, session.id);
+      scope = 'routed';
+    }
+
+    const tickets = await prisma.ticket.findMany({
+      where,
+      include: ticketInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return NextResponse.json({ success: true, tickets, scope });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro interno';
     console.error('Fetch tickets error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -58,10 +84,12 @@ export async function POST(request: Request) {
     const { title, description, category, priority } = await request.json();
 
     if (!title || !description || !category || !priority) {
-      return NextResponse.json({ success: false, error: 'Preencha todos os campos obrigatórios' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Preencha todos os campos obrigatórios' },
+        { status: 400 }
+      );
     }
 
-    // Resolve a real user from DB — session.id may be stale after a DB reset
     const dbUser = await prisma.supportUser.findUnique({ where: { id: session.id } });
     if (!dbUser) {
       return NextResponse.json(
@@ -82,25 +110,25 @@ export async function POST(request: Request) {
       },
       include: {
         creator: { select: { id: true, name: true, email: true } },
-      }
+      },
     });
 
-    // Write audit log — using the verified DB user ID
     try {
       await prisma.auditLog.create({
         data: {
           userId: dbUser.id,
           action: 'TICKET_CREATE',
-          details: `Ticket "${ticket.title}" (${ticket.id}) aberto via Portal do Cliente.`
-        }
+          details: `Ticket "${ticket.title}" (${ticket.id}) aberto via Portal do Cliente.`,
+        },
       });
     } catch (auditError) {
       console.error('Ticket create audit log error (non-critical):', auditError);
     }
 
     return NextResponse.json({ success: true, ticket });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro interno';
     console.error('Create ticket error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

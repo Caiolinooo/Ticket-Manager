@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getSession } from '@/lib/auth';
+import { canApproveIntegrations } from '@/lib/permissions';
 
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!canApproveIntegrations(session)) {
+      return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
+    }
+
     const { traceId } = await request.json();
 
     if (!traceId) {
@@ -10,29 +17,29 @@ export async function POST(request: Request) {
     }
 
     const trace = await prisma.externalTrace.findUnique({
-      where: { id: traceId }
+      where: { id: traceId },
     });
 
     if (!trace) {
       return NextResponse.json({ success: false, error: 'Trace não encontrado' }, { status: 404 });
     }
 
-    // Update status to IGNORED
     await prisma.externalTrace.update({
       where: { id: trace.id },
-      data: { status: 'IGNORED' }
+      data: { status: 'IGNORED' },
     });
 
-    // Write Audit Log — always resolve a valid admin user from DB to avoid stale session FK errors
     try {
-      const admin = await prisma.supportUser.findFirst({ where: { role: 'ADMIN' } });
-      if (admin) {
+      const auditorId =
+        session?.id ||
+        (await prisma.supportUser.findFirst({ where: { role: 'ADMIN' } }))?.id;
+      if (auditorId) {
         await prisma.auditLog.create({
           data: {
-            userId: admin.id,
+            userId: auditorId,
             action: 'INTEGRATION_IGNORE',
             details: `Mensagem pendente do ${trace.platform} (${trace.id}) marcada como ignorada.`,
-          }
+          },
         });
       }
     } catch (auditError) {
@@ -40,8 +47,9 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erro interno';
     console.error('Ignore trace error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { analyzeIncomingMessage } from '@/lib/ai';
+import { getSession } from '@/lib/auth';
+import { canApproveIntegrations } from '@/lib/permissions';
 
 export async function POST(request: Request) {
   try {
+    const session = await getSession();
+    if (!canApproveIntegrations(session)) {
+      return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
+    }
+
     const { traceId } = await request.json();
 
     if (!traceId) {
@@ -67,6 +74,7 @@ export async function POST(request: Request) {
         source: trace.platform,
         externalReferenceId: trace.externalId,
         createdById: employee.id,
+        accountUpn: (trace as { accountUpn?: string | null }).accountUpn || null,
       }
     });
 
@@ -79,10 +87,12 @@ export async function POST(request: Request) {
       }
     });
 
-    // 7. Write Audit Log — always resolve a valid admin from DB to avoid stale session FK errors
+    // 7. Write Audit Log — prefer acting operator session
     try {
-      const admin = await prisma.supportUser.findFirst({ where: { role: 'ADMIN' } });
-      const auditorId = admin?.id || employee.id;
+      const auditorId =
+        session?.id ||
+        (await prisma.supportUser.findFirst({ where: { role: 'ADMIN' } }))?.id ||
+        employee.id;
       await prisma.auditLog.create({
         data: {
           userId: auditorId,

@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
+import { canManageSettings } from '@/lib/permissions';
 
 export async function GET() {
   try {
     const session = await getSession();
-    if (!session || session.role !== 'ADMIN') {
+    if (!canManageSettings(session)) {
       return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
     }
 
@@ -39,7 +40,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await getSession();
-    if (!session || session.role !== 'ADMIN') {
+    if (!canManageSettings(session)) {
       return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
     }
 

@@ -6,6 +6,7 @@ import {
   authenticatePortalUser,
   ensureEmployeeFromPortal,
 } from '@/lib/portal-auth';
+import { isOperatorRole } from '@/lib/permissions';
 
 function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -23,11 +24,20 @@ async function loginLocalOperator(normalizedEmail: string, password: string) {
     where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
   });
 
-  if (!localUser || (localUser.role !== 'ADMIN' && localUser.role !== 'AGENT')) {
+  if (!localUser || !isOperatorRole(localUser.role)) {
     return {
       ok: false as const,
       status: 401,
       error: 'Credenciais de operador inválidas',
+    };
+  }
+
+  // Foundation field: inactive technicians cannot open operator sessions.
+  if ('active' in localUser && localUser.active === false) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: 'Conta de operador desativada. Contate o administrador.',
     };
   }
 
@@ -55,7 +65,7 @@ async function loginLocalOperator(normalizedEmail: string, password: string) {
       data: {
         userId: localUser.id,
         action: 'LOGIN',
-        details: `Usuário ${localUser.name} logou no sistema (local/operador).`,
+        details: `Usuário ${localUser.name} logou no sistema (local/operador, role=${localUser.role}).`,
       },
     });
   } catch (auditError) {
@@ -77,7 +87,7 @@ async function loginPortalClient(normalizedEmail: string, password: string) {
 
   const employee = await ensureEmployeeFromPortal(portal.user);
 
-  // Always a client session. If the same email is also a local ADMIN/AGENT,
+  // Always a client session. If the same email is also a local operator,
   // operators must use area=admin; here we only expose the client role in the cookie.
   const sessionData = {
     id: employee.id,
@@ -142,12 +152,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, user: result.sessionData });
     }
 
-    // auto: operators first when local ADMIN/AGENT exists, else Portal client
+    // auto: operators first when local ADMIN/TECHNICIAN/AGENT exists, else Portal client
     const localUser = await prisma.supportUser.findFirst({
       where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
     });
 
-    if (localUser && (localUser.role === 'ADMIN' || localUser.role === 'AGENT')) {
+    if (localUser && isOperatorRole(localUser.role)) {
       const result = await loginLocalOperator(normalizedEmail, password);
       if (result.ok) {
         return NextResponse.json({ success: true, user: result.sessionData });
