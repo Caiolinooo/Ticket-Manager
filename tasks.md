@@ -1,11 +1,72 @@
 # Ticket-Manager — Tarefas de alto nível
 
-Atualizado: 2026-07-19
+Atualizado: 2026-07-28
 
 ## Legenda
 
 - `[x]` feito
 - `[ ]` pendente
+
+---
+
+## 9. Feature Técnicos (multi-operador)
+
+### Contexto avaliado (Foundation)
+
+| Área | Estado atual |
+|------|----------------|
+| **Auth** | Operador: `SupportUser` local (roles `ADMIN` \| `AGENT`) + cookie JWT `session` (SHA-256 senha). Cliente: Portal/EmployeeHub → role `EMPLOYEE`. Soft-SSO via `abzToken`. |
+| **SystemConfig** | Key/value em `ticket_support.SystemConfig` — IA (`ai_provider`, keys) + integração (`monitored_accounts`, sync flags). CRUD só ADMIN em `/api/settings`. |
+| **monitored_accounts** | String CSV global no SystemConfig; `microsoft.ts` lê e sincroniza Teams/Exchange dessas caixas (setor compartilhado). |
+| **Teams/Exchange sync** | On-demand via `/api/integrations/*`; agrupa em `ExternalTrace` PENDING; approve → Ticket. |
+| **Tickets/KPI** | Admin UI: tickets, pending, KPIs; assignees via `/api/users` (ADMIN+AGENT). Sem filtro por técnico ainda. |
+
+### Decisão de modelo (Foundation)
+
+- **Estender `SupportUser`** (sem tabela Technician separada).
+- Role nova: **`TECHNICIAN`** (distinta de `ADMIN`; `AGENT` permanece legado).
+- Listas em colunas TEXT com JSON `string[]`; `receiveMode` + `active` no próprio user.
+
+#### Contrato final (campos)
+
+| Campo | Tipo | Notas |
+|-------|------|--------|
+| `id` | uuid | PK SupportUser |
+| `name` | string | obrigatório |
+| `email` | string unique | login operador |
+| `passwordHash` | string | SHA-256 (mesmo hash do admin/seed) |
+| `role` | `"TECHNICIAN"` | |
+| `monitoredEmails` | `string[]` (JSON TEXT) | caixas Exchange do técnico |
+| `monitoredTeamsAccounts` | `string[]` (JSON TEXT) | UPNs/contas Teams |
+| `receiveMode` | `SHARED_WITH_ADMIN` \| `OWN_ONLY` | default efetivo: SHARED_WITH_ADMIN |
+| `active` | boolean | default `true`; DELETE API = soft deactivate |
+
+**receiveMode**
+- `SHARED_WITH_ADMIN`: pendências das contas do técnico **+** contas compartilhadas do admin/setor (`SystemConfig.monitored_accounts`)
+- `OWN_ONLY`: só `monitoredEmails` / `monitoredTeamsAccounts` dele
+
+#### API (ADMIN only)
+
+- `GET/POST /api/settings/technicians`
+- `GET/PATCH/DELETE /api/settings/technicians/[id]` (DELETE → `active=false`)
+
+### 9.1 Foundation (este agente) — schema + settings UI/API
+- [x] Avaliar auth / SystemConfig / sync / KPI e documentar acima
+- [x] Schema Prisma: campos technician em `SupportUser`
+- [x] Migration SQL + `scripts/add-technician-fields.mjs`
+- [x] API `/api/settings/technicians` (+ `[id]`) com validação de e-mail
+- [x] UI Admin → Configurações → seção **Técnicos** (CRUD / ativar-desativar)
+- [x] Aplicar colunas no DB (local + server compartilham Supabase)
+- [ ] Login operador aceitar `TECHNICIAN` (mínimo — se ainda não feito por Auth/Routing)
+- [x] Commit `feat(technicians): schema and settings UI`
+
+### 9.2 Routing (outro agente) — NÃO Foundation
+- [ ] Filtrar pendências / sync / assign por `monitoredEmails`, `monitoredTeamsAccounts`, `receiveMode`
+- [ ] Não alterar schema de técnicos além do contrato acima
+
+### 9.3 Auth / UX operadores (backlog relacionado)
+- [ ] Tratar `TECHNICIAN` como operador no login (`area=admin`) e guards de API que hoje só checam ADMIN/AGENT
+- [ ] Incluir TECHNICIAN em listas de assignee (`/api/users`) se desejado
 
 ---
 
@@ -217,6 +278,7 @@ Atualizado: 2026-07-19
 - [ ] Documentar runbook de rotação de `MS_GRAPH_CLIENT_SECRET` e Gemini key
 - [ ] Testes E2E (Playwright) para login Admin + sync + approve
 - [ ] (Opcional) Anexar follow-up a Ticket OPEN existente (além de PENDING ExternalTrace)
+- [ ] Feature Técnicos: routing de pendências + login TECHNICIAN (ver §9)
 
 ---
 
@@ -230,3 +292,4 @@ Atualizado: 2026-07-19
 | PM2 | `ticket-manager` |
 | Porta | `9120` |
 | Contas monitoradas | configurar no Admin (`monitored_accounts`) — ex. placeholder `user@example.com` |
+| Técnicos | Admin → Configurações → Técnicos (`SupportUser` role `TECHNICIAN`) |

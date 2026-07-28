@@ -9,13 +9,21 @@ generator client {
 }
 
 model SupportUser {
-  id              String          @id @default(uuid())
-  email           String          @unique
-  passwordHash    String
-  name            String
-  role            String          // "ADMIN" | "AGENT" | "EMPLOYEE"
-  microsoftUserId String?
-  createdAt       DateTime        @default(now())
+  id                     String          @id @default(uuid())
+  email                  String          @unique
+  passwordHash           String
+  name                   String
+  role                   String          // "ADMIN" | "TECHNICIAN" | "EMPLOYEE" (legacy "AGENT" ≡ TECHNICIAN)
+  microsoftUserId        String?
+  /// JSON string[] — caixas Exchange das quais o técnico recebe pendências
+  monitoredEmails        String?
+  /// JSON string[] — UPNs/contas Teams do técnico
+  monitoredTeamsAccounts String?
+  /// SHARED_WITH_ADMIN | OWN_ONLY (relevante para role TECHNICIAN)
+  receiveMode            String?
+  /// false = desativado (não recebe/não opera); default true
+  active                 Boolean         @default(true)
+  createdAt              DateTime        @default(now())
 
   createdTickets  Ticket[]        @relation("CreatedTickets")
   assignedTickets Ticket[]        @relation("AssignedTickets")
@@ -37,6 +45,8 @@ model Ticket {
   assignedToId        String?
   source              String          // "PORTAL" | "TEAMS" | "EMAIL"
   externalReferenceId String?
+  /// Caixa monitorada (UPN) de origem — null para PORTAL / legado
+  accountUpn          String?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   resolvedAt          DateTime?
@@ -46,6 +56,7 @@ model Ticket {
   messages            TicketMessage[]
   externalTraces      ExternalTrace[]
 
+  @@index([accountUpn])
   @@schema("ticket_support")
 }
 
@@ -73,11 +84,14 @@ model ExternalTrace {
   channelOrSubject String
   rawContent       String
   status           String    // "PENDING_APPROVAL" | "APPROVED" | "IGNORED"
+  /// Caixa monitorada (UPN) que recebeu a mensagem — usado no filtro por técnico
+  accountUpn       String?
   receivedAt       DateTime  @default(now())
 
   ticket           Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
 
   @@index([platform, conversationId, status])
+  @@index([accountUpn, status])
   @@schema("ticket_support")
 }
 

@@ -7,8 +7,16 @@ import {
   ShieldAlert, User, Cpu, Sparkles, Filter, Search, Download, 
   RefreshCw, Bot, Check, X, BarChart3, Database, MessageSquareWarning, 
   Settings2, Calendar, TrendingUp, TrendingDown, Minus, ChevronRight,
-  FileSpreadsheet, Zap
+  FileSpreadsheet, Zap, Wrench, Pencil, UserPlus
 } from 'lucide-react';
+import {
+  canAccessOperatorArea,
+  canManageSettings,
+  canSyncMicrosoft,
+  isAdminRole,
+  roleDisplayLabel,
+} from '@/lib/permissions';
+import { RoleBadge } from '@/components/permission-gates';
 
 interface UserInfo {
   id: string;
@@ -38,6 +46,20 @@ interface ExternalTrace {
   rawContent: string;
   receivedAt: string;
   status: string;
+}
+
+type ReceiveMode = 'SHARED_WITH_ADMIN' | 'OWN_ONLY';
+
+interface Technician {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  monitoredEmails: string[];
+  monitoredTeamsAccounts: string[];
+  receiveMode: ReceiveMode;
+  active: boolean;
+  createdAt: string;
 }
 
 interface Ticket {
@@ -129,6 +151,21 @@ export default function AdminDashboard() {
   const [teamsEnabled, setTeamsEnabled] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState('');
+
+  // Technicians (ADMIN settings)
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [techniciansLoading, setTechniciansLoading] = useState(false);
+  const [technicianError, setTechnicianError] = useState('');
+  const [technicianSuccess, setTechnicianSuccess] = useState('');
+  const [technicianSaving, setTechnicianSaving] = useState(false);
+  const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(null);
+  const [techFormName, setTechFormName] = useState('');
+  const [techFormEmail, setTechFormEmail] = useState('');
+  const [techFormPassword, setTechFormPassword] = useState('');
+  const [techFormMonitoredEmails, setTechFormMonitoredEmails] = useState('');
+  const [techFormTeamsAccounts, setTechFormTeamsAccounts] = useState('');
+  const [techFormReceiveMode, setTechFormReceiveMode] = useState<ReceiveMode>('SHARED_WITH_ADMIN');
+  const [techFormActive, setTechFormActive] = useState(true);
 
   // Resolution Modal State
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -276,6 +313,122 @@ export default function AdminDashboard() {
     }
   };
 
+  const resetTechnicianForm = () => {
+    setEditingTechnicianId(null);
+    setTechFormName('');
+    setTechFormEmail('');
+    setTechFormPassword('');
+    setTechFormMonitoredEmails('');
+    setTechFormTeamsAccounts('');
+    setTechFormReceiveMode('SHARED_WITH_ADMIN');
+    setTechFormActive(true);
+    setTechnicianError('');
+  };
+
+  const loadTechnicians = async () => {
+    setTechniciansLoading(true);
+    setTechnicianError('');
+    try {
+      const res = await fetch('/api/settings/technicians', { credentials: 'include' });
+      if (res.status === 403) {
+        setTechnicians([]);
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setTechnicianError(data.error || 'Falha ao carregar técnicos');
+        return;
+      }
+      setTechnicians(data.technicians || []);
+    } catch (err: unknown) {
+      setTechnicianError(err instanceof Error ? err.message : 'Erro ao carregar técnicos');
+    } finally {
+      setTechniciansLoading(false);
+    }
+  };
+
+  const startEditTechnician = (tech: Technician) => {
+    setEditingTechnicianId(tech.id);
+    setTechFormName(tech.name);
+    setTechFormEmail(tech.email);
+    setTechFormPassword('');
+    setTechFormMonitoredEmails(tech.monitoredEmails.join(', '));
+    setTechFormTeamsAccounts(tech.monitoredTeamsAccounts.join(', '));
+    setTechFormReceiveMode(tech.receiveMode);
+    setTechFormActive(tech.active);
+    setTechnicianError('');
+    setTechnicianSuccess('');
+  };
+
+  const parseCsvEmails = (raw: string): string[] =>
+    raw.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+
+  const handleSaveTechnician = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTechnicianSaving(true);
+    setTechnicianError('');
+    setTechnicianSuccess('');
+    try {
+      const payload = {
+        name: techFormName.trim(),
+        email: techFormEmail.trim().toLowerCase(),
+        password: techFormPassword,
+        monitoredEmails: parseCsvEmails(techFormMonitoredEmails),
+        monitoredTeamsAccounts: parseCsvEmails(techFormTeamsAccounts),
+        receiveMode: techFormReceiveMode,
+        active: techFormActive,
+      };
+
+      const isEdit = Boolean(editingTechnicianId);
+      const url = isEdit
+        ? `/api/settings/technicians/${editingTechnicianId}`
+        : '/api/settings/technicians';
+      const body = isEdit && !techFormPassword
+        ? { ...payload, password: undefined }
+        : payload;
+
+      const res = await fetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setTechnicianError(data.error || 'Falha ao salvar técnico');
+        return;
+      }
+      setTechnicianSuccess(isEdit ? 'Técnico atualizado.' : 'Técnico criado.');
+      resetTechnicianForm();
+      await loadTechnicians();
+      setTimeout(() => setTechnicianSuccess(''), 4000);
+    } catch (err: unknown) {
+      setTechnicianError(err instanceof Error ? err.message : 'Erro ao salvar técnico');
+    } finally {
+      setTechnicianSaving(false);
+    }
+  };
+
+  const handleToggleTechnicianActive = async (tech: Technician) => {
+    setTechnicianError('');
+    try {
+      const res = await fetch(`/api/settings/technicians/${tech.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ active: !tech.active }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setTechnicianError(data.error || 'Falha ao alterar status');
+        return;
+      }
+      await loadTechnicians();
+    } catch (err: unknown) {
+      setTechnicianError(err instanceof Error ? err.message : 'Erro ao alterar status');
+    }
+  };
+
   useEffect(() => {
     async function loadData() {
       try {
@@ -306,6 +459,9 @@ export default function AdminDashboard() {
         }
 
         await loadSettings();
+        if (userData.user.role === 'ADMIN') {
+          await loadTechnicians();
+        }
       } catch (err) {
         console.error('Error loading initial data:', err instanceof Error ? err.message : err);
         router.replace('/');
@@ -1754,6 +1910,226 @@ export default function AdminDashboard() {
               <div className="p-4 bg-slate-950/20 border border-white/5 rounded-xl text-xs text-slate-400 leading-relaxed">
                 <span className="font-semibold text-slate-200">ℹ️ Modo de Simulação:</span> Sem credenciais configuradas, o sistema opera em modo simulado fornecendo respostas realistas para homologação e auditoria técnica.
               </div>
+
+              {user?.role === 'ADMIN' && (
+                <div className="glass-card rounded-2xl p-6 border border-white/5 relative shadow-lg space-y-5">
+                  <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <Wrench className="h-4 w-4 text-emerald-400" /> Técnicos
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Cadastre operadores TECHNICIAN com caixas Exchange, contas Teams e modo de recebimento.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { resetTechnicianForm(); void loadTechnicians(); }}
+                      className="text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 rounded-lg border border-white/5 cursor-pointer"
+                    >
+                      {techniciansLoading ? '...' : 'Atualizar'}
+                    </button>
+                  </div>
+
+                  {technicianSuccess && (
+                    <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-3 text-emerald-200 text-xs flex items-center gap-2">
+                      <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                      {technicianSuccess}
+                    </div>
+                  )}
+                  {technicianError && (
+                    <div className="bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 text-rose-200 text-xs flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                      {technicianError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {technicians.length === 0 && !techniciansLoading && (
+                      <p className="text-xs text-slate-500 py-2">Nenhum técnico cadastrado.</p>
+                    )}
+                    {technicians.map((tech) => (
+                      <div
+                        key={tech.id}
+                        className={`rounded-xl border px-3 py-2.5 flex items-start justify-between gap-3 ${
+                          tech.active ? 'border-white/5 bg-slate-950/40' : 'border-white/5 bg-slate-950/20 opacity-70'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-white truncate">{tech.name}</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tech.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'}`}>
+                              {tech.active ? 'ATIVO' : 'INATIVO'}
+                            </span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">
+                              {tech.receiveMode === 'OWN_ONLY' ? 'OWN_ONLY' : 'SHARED_WITH_ADMIN'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">{tech.email}</p>
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            E-mails: {tech.monitoredEmails.length ? tech.monitoredEmails.join(', ') : '—'}
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Teams: {tech.monitoredTeamsAccounts.length ? tech.monitoredTeamsAccounts.join(', ') : '—'}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditTechnician(tech)}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-300 hover:text-white px-2 py-1 rounded-lg border border-white/5 cursor-pointer"
+                          >
+                            <Pencil className="h-3 w-3" /> Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleTechnicianActive(tech)}
+                            className="text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 rounded-lg border border-white/5 cursor-pointer"
+                          >
+                            {tech.active ? 'Desativar' : 'Ativar'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleSaveTechnician} className="pt-4 border-t border-white/5 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                      <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
+                      {editingTechnicianId ? 'Editar técnico' : 'Adicionar técnico'}
+                      {editingTechnicianId && (
+                        <button
+                          type="button"
+                          onClick={resetTechnicianForm}
+                          className="ml-auto text-[10px] text-slate-500 hover:text-white cursor-pointer"
+                        >
+                          Cancelar edição
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">Nome</label>
+                        <input
+                          type="text"
+                          value={techFormName}
+                          onChange={(e) => setTechFormName(e.target.value)}
+                          required
+                          className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                          placeholder="Nome do técnico"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">E-mail (login)</label>
+                        <input
+                          type="email"
+                          value={techFormEmail}
+                          onChange={(e) => setTechFormEmail(e.target.value)}
+                          required
+                          className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                          placeholder="tecnico@example.com"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                        Senha {editingTechnicianId ? '(deixe em branco para manter)' : ''}
+                      </label>
+                      <input
+                        type="password"
+                        value={techFormPassword}
+                        onChange={(e) => setTechFormPassword(e.target.value)}
+                        required={!editingTechnicianId}
+                        minLength={editingTechnicianId && !techFormPassword ? undefined : 6}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                        placeholder={editingTechnicianId ? 'Nova senha (opcional)' : 'Mínimo 6 caracteres'}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                        monitoredEmails (caixas Exchange)
+                      </label>
+                      <input
+                        type="text"
+                        value={techFormMonitoredEmails}
+                        onChange={(e) => setTechFormMonitoredEmails(e.target.value)}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                        placeholder="caixa1@example.com, caixa2@example.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                        monitoredTeamsAccounts (UPNs Teams)
+                      </label>
+                      <input
+                        type="text"
+                        value={techFormTeamsAccounts}
+                        onChange={(e) => setTechFormTeamsAccounts(e.target.value)}
+                        className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                        placeholder="tecnico@example.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">receiveMode</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTechFormReceiveMode('SHARED_WITH_ADMIN')}
+                          className={`flex-1 py-2 rounded-xl border text-[10px] font-bold transition-all cursor-pointer ${
+                            techFormReceiveMode === 'SHARED_WITH_ADMIN'
+                              ? 'bg-emerald-600 border-emerald-500 text-white'
+                              : 'bg-slate-950 border-white/5 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          SHARED_WITH_ADMIN
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTechFormReceiveMode('OWN_ONLY')}
+                          className={`flex-1 py-2 rounded-xl border text-[10px] font-bold transition-all cursor-pointer ${
+                            techFormReceiveMode === 'OWN_ONLY'
+                              ? 'bg-emerald-600 border-emerald-500 text-white'
+                              : 'bg-slate-950 border-white/5 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          OWN_ONLY
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        SHARED: contas do técnico + contas compartilhadas do admin/setor. OWN_ONLY: só as dele.
+                      </p>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={techFormActive}
+                        onChange={(e) => setTechFormActive(e.target.checked)}
+                        className="rounded border-white/20"
+                      />
+                      Ativo
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={technicianSaving}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      {technicianSaving
+                        ? 'Salvando...'
+                        : editingTechnicianId
+                          ? 'Salvar alterações'
+                          : 'Criar técnico'}
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           )}
 
