@@ -207,3 +207,15 @@ export function roleDisplayLabel(role: string | null | undefined): string {
   if (isEmployeeRole(role)) return 'Cliente';
   return role || 'Usuário';
 }
+
+/** Documented ADMIN vs TECHNICIAN matrix (see tasks.md §9b). */
+export const PERMISSION_MATRIX = {
+  operatorLogin: { ADMIN: true, TECHNICIAN: true },
+  viewUpdateTickets: { ADMIN: true, TECHNICIAN: true },
+  approvePending: { ADMIN: true, TECHNICIAN: true },
+  kpisExport: { ADMIN: true, TECHNICIAN: true },
+  systemSettings: { ADMIN: true, TECHNICIAN: false },
+  crudTechnicians: { ADMIN: true, TECHNICIAN: false },
+  microsoftSync: { ADMIN: true, TECHNICIAN: false },
+} as const;
+
