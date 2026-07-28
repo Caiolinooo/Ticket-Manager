@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import * as crypto from 'crypto';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { canManageTechnicians } from '@/lib/permissions';
@@ -8,10 +7,6 @@ export const RECEIVE_MODES = ['SHARED_WITH_ADMIN', 'OWN_ONLY'] as const;
 export type ReceiveMode = (typeof RECEIVE_MODES)[number];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
 
 export function parseStringArray(raw: string | null | undefined): string[] {
   if (!raw || !raw.trim()) return [];
@@ -61,6 +56,8 @@ export function toTechnicianDto(user: {
   receiveMode: string | null;
   active: boolean;
   createdAt: Date;
+  portalUserId?: string | null;
+  authSource?: string | null;
 }) {
   return {
     id: user.id,
@@ -72,6 +69,8 @@ export function toTechnicianDto(user: {
     receiveMode: (user.receiveMode === 'OWN_ONLY' ? 'OWN_ONLY' : 'SHARED_WITH_ADMIN') as ReceiveMode,
     active: user.active,
     createdAt: user.createdAt.toISOString(),
+    portalUserId: user.portalUserId || null,
+    authSource: user.authSource === 'portal' ? 'portal' : user.authSource || 'local',
   };
 }
 

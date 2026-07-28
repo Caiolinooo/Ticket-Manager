@@ -32,9 +32,11 @@ Atualizado: 2026-07-28
 | Campo | Tipo | Notas |
 |-------|------|--------|
 | `id` | uuid | PK SupportUser |
-| `name` | string | obrigatório |
-| `email` | string unique | login operador |
-| `passwordHash` | string | SHA-256 (mesmo hash do admin/seed) |
+| `name` | string | espelhado do Portal |
+| `email` | string unique | login = e-mail do Portal |
+| `passwordHash` | string | marcador `portal-auth` (senha no Portal bcrypt) |
+| `portalUserId` | string? | id em `public.users_unified` |
+| `authSource` | `"portal"` \| `"local"` | técnicos novos = portal |
 | `role` | `"TECHNICIAN"` | |
 | `monitoredEmails` | `string[]` (JSON TEXT) | caixas Exchange do técnico |
 | `monitoredTeamsAccounts` | `string[]` (JSON TEXT) | UPNs/contas Teams |
@@ -47,7 +49,8 @@ Atualizado: 2026-07-28
 
 #### API (ADMIN only)
 
-- `GET/POST /api/settings/technicians`
+- `GET/POST /api/settings/technicians` (POST: `{ portalUserId \| email, … }` — sem senha)
+- `GET /api/settings/technicians/portal-users?q=` — busca Portal
 - `GET/PATCH/DELETE /api/settings/technicians/[id]` (DELETE → `active=false`)
 
 ### 9.1 Foundation (este agente) — schema + settings UI/API
@@ -73,6 +76,14 @@ Atualizado: 2026-07-28
 ### 9.3 Auth / UX operadores
 - [x] Tratar `TECHNICIAN` como operador no login (`area=admin`) e guards de API
 - [x] Incluir TECHNICIAN em listas de assignee (`/api/users`)
+
+### 9.4 Técnicos via Portal (v1.3.1)
+- [x] `portalUserId` + `authSource` em `SupportUser` (migration + script)
+- [x] `GET /api/settings/technicians/portal-users?q=` — busca `users_unified` (sem hash)
+- [x] `POST /api/settings/technicians` cria TECHNICIAN a partir do Portal (sem senha local)
+- [x] Login operador TECHNICIAN: bcrypt Portal; ADMIN local SHA-256 preservado
+- [x] UI: search box Portal + config (emails/Teams/receiveMode/active)
+- [x] Smoke portal-technician + bump `1.3.1` + tag + deploy
 
 ---
 
@@ -178,6 +189,8 @@ Atualizado: 2026-07-28
 - [x] Tag `v1.2.2` + push
 - [x] Bump minor `1.3.0` — técnicos: routing + KPI unificado
 - [x] Tag `v1.3.0` + push
+- [x] Bump patch `1.3.1` — técnicos via Portal (search + login bcrypt)
+- [x] Tag `v1.3.1` + push
 
 ### 3.2 Licença e README
 - [x] `LICENSE` proprietária (proíbe cópia/venda/redistribuição sem autorização)
@@ -202,6 +215,7 @@ Atualizado: 2026-07-28
 - [x] Redeploy pós-limpeza de branding (v1.0.1)
 - [x] Redeploy pós-fix `Ticket.resolution` (v1.0.2)
 - [x] Redeploy v1.1.0 (agrupamento + Direct Fix auditoria)
+- [x] Redeploy v1.3.1 (técnicos Portal auth)
 
 ### 4.2 Smoke
 - [x] App respondendo na porta **9120** (`/` e `/admin` → HTTP 200)

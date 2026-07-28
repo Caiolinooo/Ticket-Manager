@@ -59,6 +59,16 @@ interface Technician {
   receiveMode: ReceiveMode;
   active: boolean;
   createdAt: string;
+  portalUserId?: string | null;
+  authSource?: string | null;
+}
+
+interface PortalUserHit {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+  role: string;
 }
 
 interface Ticket {
@@ -162,11 +172,16 @@ export default function AdminDashboard() {
   const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(null);
   const [techFormName, setTechFormName] = useState('');
   const [techFormEmail, setTechFormEmail] = useState('');
-  const [techFormPassword, setTechFormPassword] = useState('');
+  const [techFormPortalUserId, setTechFormPortalUserId] = useState('');
   const [techFormMonitoredEmails, setTechFormMonitoredEmails] = useState('');
   const [techFormTeamsAccounts, setTechFormTeamsAccounts] = useState('');
   const [techFormReceiveMode, setTechFormReceiveMode] = useState<ReceiveMode>('SHARED_WITH_ADMIN');
   const [techFormActive, setTechFormActive] = useState(true);
+  const [portalSearchQuery, setPortalSearchQuery] = useState('');
+  const [portalSearchResults, setPortalSearchResults] = useState<PortalUserHit[]>([]);
+  const [portalSearchLoading, setPortalSearchLoading] = useState(false);
+  const [portalSearchHint, setPortalSearchHint] = useState('');
+  const portalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resolution Modal State
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -319,11 +334,14 @@ export default function AdminDashboard() {
     setEditingTechnicianId(null);
     setTechFormName('');
     setTechFormEmail('');
-    setTechFormPassword('');
+    setTechFormPortalUserId('');
     setTechFormMonitoredEmails('');
     setTechFormTeamsAccounts('');
     setTechFormReceiveMode('SHARED_WITH_ADMIN');
     setTechFormActive(true);
+    setPortalSearchQuery('');
+    setPortalSearchResults([]);
+    setPortalSearchHint('');
     setTechnicianError('');
   };
 
@@ -349,15 +367,66 @@ export default function AdminDashboard() {
     }
   };
 
+  const searchPortalUsers = async (q: string) => {
+    const trimmed = q.trim();
+    if (trimmed.length < 2) {
+      setPortalSearchResults([]);
+      setPortalSearchHint(trimmed ? 'Digite ao menos 2 caracteres' : '');
+      return;
+    }
+    setPortalSearchLoading(true);
+    setPortalSearchHint('');
+    try {
+      const res = await fetch(
+        `/api/settings/technicians/portal-users?q=${encodeURIComponent(trimmed)}`,
+        { credentials: 'include' }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setPortalSearchResults([]);
+        setPortalSearchHint(data.error || 'Falha na busca do Portal');
+        return;
+      }
+      const users = (data.users || []) as PortalUserHit[];
+      setPortalSearchResults(users);
+      setPortalSearchHint(users.length === 0 ? 'Nenhum usuário encontrado no Portal' : '');
+    } catch (err: unknown) {
+      setPortalSearchResults([]);
+      setPortalSearchHint(err instanceof Error ? err.message : 'Erro ao buscar no Portal');
+    } finally {
+      setPortalSearchLoading(false);
+    }
+  };
+
+  const onPortalSearchChange = (value: string) => {
+    setPortalSearchQuery(value);
+    if (portalSearchTimer.current) clearTimeout(portalSearchTimer.current);
+    portalSearchTimer.current = setTimeout(() => {
+      void searchPortalUsers(value);
+    }, 300);
+  };
+
+  const selectPortalUser = (hit: PortalUserHit) => {
+    setTechFormPortalUserId(hit.id);
+    setTechFormName(hit.name);
+    setTechFormEmail(hit.email);
+    setPortalSearchQuery('');
+    setPortalSearchResults([]);
+    setPortalSearchHint('');
+    setTechnicianError('');
+  };
+
   const startEditTechnician = (tech: Technician) => {
     setEditingTechnicianId(tech.id);
     setTechFormName(tech.name);
     setTechFormEmail(tech.email);
-    setTechFormPassword('');
+    setTechFormPortalUserId(tech.portalUserId || '');
     setTechFormMonitoredEmails(tech.monitoredEmails.join(', '));
     setTechFormTeamsAccounts(tech.monitoredTeamsAccounts.join(', '));
     setTechFormReceiveMode(tech.receiveMode);
     setTechFormActive(tech.active);
+    setPortalSearchQuery('');
+    setPortalSearchResults([]);
     setTechnicianError('');
     setTechnicianSuccess('');
   };
@@ -371,23 +440,30 @@ export default function AdminDashboard() {
     setTechnicianError('');
     setTechnicianSuccess('');
     try {
-      const payload = {
-        name: techFormName.trim(),
-        email: techFormEmail.trim().toLowerCase(),
-        password: techFormPassword,
+      const isEdit = Boolean(editingTechnicianId);
+
+      if (!isEdit && !techFormPortalUserId && !techFormEmail) {
+        setTechnicianError('Selecione um usuário do Portal');
+        return;
+      }
+
+      const common = {
         monitoredEmails: parseCsvEmails(techFormMonitoredEmails),
         monitoredTeamsAccounts: parseCsvEmails(techFormTeamsAccounts),
         receiveMode: techFormReceiveMode,
         active: techFormActive,
       };
 
-      const isEdit = Boolean(editingTechnicianId);
       const url = isEdit
         ? `/api/settings/technicians/${editingTechnicianId}`
         : '/api/settings/technicians';
-      const body = isEdit && !techFormPassword
-        ? { ...payload, password: undefined }
-        : payload;
+      const body = isEdit
+        ? common
+        : {
+            ...common,
+            portalUserId: techFormPortalUserId || undefined,
+            email: techFormEmail || undefined,
+          };
 
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
@@ -400,7 +476,7 @@ export default function AdminDashboard() {
         setTechnicianError(data.error || 'Falha ao salvar técnico');
         return;
       }
-      setTechnicianSuccess(isEdit ? 'Técnico atualizado.' : 'Técnico criado.');
+      setTechnicianSuccess(isEdit ? 'Técnico atualizado.' : 'Técnico criado (login = Portal).');
       resetTechnicianForm();
       await loadTechnicians();
       setTimeout(() => setTechnicianSuccess(''), 4000);
@@ -1936,7 +2012,7 @@ export default function AdminDashboard() {
                         <Wrench className="h-4 w-4 text-emerald-400" /> Técnicos
                       </h3>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        Cadastre operadores TECHNICIAN com caixas Exchange, contas Teams e modo de recebimento.
+                        Vincule operadores TECHNICIAN a usuários do Portal. Login = e-mail e senha do Portal.
                       </p>
                     </div>
                     <button
@@ -1983,6 +2059,10 @@ export default function AdminDashboard() {
                             </span>
                           </div>
                           <p className="text-[10px] text-slate-400 truncate mt-0.5">{tech.email}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Auth: {tech.authSource === 'portal' || tech.portalUserId ? 'Portal' : 'legado'}
+                            {tech.portalUserId ? ` · ${tech.portalUserId.slice(0, 8)}…` : ''}
+                          </p>
                           <p className="text-[10px] text-slate-500 mt-1">
                             E-mails: {tech.monitoredEmails.length ? tech.monitoredEmails.join(', ') : '—'}
                           </p>
@@ -2013,7 +2093,7 @@ export default function AdminDashboard() {
                   <form onSubmit={handleSaveTechnician} className="pt-4 border-t border-white/5 space-y-3">
                     <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
                       <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
-                      {editingTechnicianId ? 'Editar técnico' : 'Adicionar técnico'}
+                      {editingTechnicianId ? 'Editar técnico' : 'Adicionar técnico (Portal)'}
                       {editingTechnicianId && (
                         <button
                           type="button"
@@ -2025,45 +2105,57 @@ export default function AdminDashboard() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">Nome</label>
-                        <input
-                          type="text"
-                          value={techFormName}
-                          onChange={(e) => setTechFormName(e.target.value)}
-                          required
-                          className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                          placeholder="Nome do técnico"
-                        />
+                    {!editingTechnicianId && (
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                          Buscar usuário no Portal
+                        </label>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+                          <input
+                            type="search"
+                            value={portalSearchQuery}
+                            onChange={(e) => onPortalSearchChange(e.target.value)}
+                            className="block w-full pl-9 pr-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                            placeholder="Nome ou e-mail no Portal…"
+                            autoComplete="off"
+                          />
+                        </div>
+                        {portalSearchLoading && (
+                          <p className="text-[10px] text-slate-500">Buscando…</p>
+                        )}
+                        {portalSearchHint && !portalSearchLoading && (
+                          <p className="text-[10px] text-slate-500">{portalSearchHint}</p>
+                        )}
+                        {portalSearchResults.length > 0 && (
+                          <ul className="max-h-40 overflow-y-auto rounded-xl border border-white/5 bg-slate-950/80 divide-y divide-white/5">
+                            {portalSearchResults.map((hit) => (
+                              <li key={hit.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => selectPortalUser(hit)}
+                                  className="w-full text-left px-3 py-2 hover:bg-emerald-950/30 cursor-pointer"
+                                >
+                                  <span className="block text-xs font-semibold text-white truncate">{hit.name}</span>
+                                  <span className="block text-[10px] text-slate-400 truncate">{hit.email}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">E-mail (login)</label>
-                        <input
-                          type="email"
-                          value={techFormEmail}
-                          onChange={(e) => setTechFormEmail(e.target.value)}
-                          required
-                          className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                          placeholder="tecnico@example.com"
-                        />
-                      </div>
-                    </div>
+                    )}
 
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
-                        Senha {editingTechnicianId ? '(deixe em branco para manter)' : ''}
-                      </label>
-                      <input
-                        type="password"
-                        value={techFormPassword}
-                        onChange={(e) => setTechFormPassword(e.target.value)}
-                        required={!editingTechnicianId}
-                        minLength={editingTechnicianId && !techFormPassword ? undefined : 6}
-                        className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                        placeholder={editingTechnicianId ? 'Nova senha (opcional)' : 'Mínimo 6 caracteres'}
-                      />
-                    </div>
+                    {(techFormEmail || editingTechnicianId) && (
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 px-3 py-2">
+                        <p className="text-[10px] font-semibold text-emerald-300 uppercase">Usuário selecionado</p>
+                        <p className="text-xs font-bold text-white mt-0.5">{techFormName || '—'}</p>
+                        <p className="text-[10px] text-slate-400">{techFormEmail}</p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Login do técnico = mesmas credenciais do Portal (sem senha local).
+                        </p>
+                      </div>
+                    )}
 
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
@@ -2134,7 +2226,7 @@ export default function AdminDashboard() {
 
                     <button
                       type="submit"
-                      disabled={technicianSaving}
+                      disabled={technicianSaving || (!editingTechnicianId && !techFormPortalUserId && !techFormEmail)}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
                       {technicianSaving

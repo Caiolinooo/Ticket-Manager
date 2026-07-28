@@ -5,8 +5,9 @@ import { setSessionCookie } from '@/lib/auth';
 import {
   authenticatePortalUser,
   ensureEmployeeFromPortal,
+  PORTAL_AUTH_MARKER,
 } from '@/lib/portal-auth';
-import { isOperatorRole } from '@/lib/permissions';
+import { isOperatorRole, isTechnicianRole } from '@/lib/permissions';
 
 function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -17,6 +18,11 @@ type LoginArea = 'client' | 'admin' | 'auto';
 function normalizeArea(raw: unknown): LoginArea {
   if (raw === 'client' || raw === 'admin' || raw === 'auto') return raw;
   return 'auto';
+}
+
+function usesPortalOperatorAuth(localUser: { role: string }): boolean {
+  // TECHNICIAN / legacy AGENT always authenticate via Portal bcrypt
+  return isTechnicianRole(localUser.role);
 }
 
 async function loginLocalOperator(normalizedEmail: string, password: string) {
@@ -41,6 +47,64 @@ async function loginLocalOperator(normalizedEmail: string, password: string) {
     };
   }
 
+  // TECHNICIAN: validate password against Portal (bcrypt / users_unified)
+  if (usesPortalOperatorAuth(localUser)) {
+    const portal = await authenticatePortalUser(normalizedEmail, password);
+    if (!portal.ok) {
+      return {
+        ok: false as const,
+        status: portal.status,
+        error:
+          portal.status === 401
+            ? 'Credenciais de operador inválidas (use a senha do Portal)'
+            : portal.error,
+      };
+    }
+
+    // Keep SupportUser name in sync with Portal display name
+    if (localUser.name !== portal.displayName || localUser.portalUserId !== portal.user.id) {
+      try {
+        await prisma.supportUser.update({
+          where: { id: localUser.id },
+          data: {
+            name: portal.displayName,
+            portalUserId: portal.user.id,
+            authSource: 'portal',
+            passwordHash: PORTAL_AUTH_MARKER,
+          },
+        });
+      } catch (syncErr) {
+        console.error('Technician portal sync (non-critical):', syncErr);
+      }
+    }
+
+    const sessionData = {
+      id: localUser.id,
+      name: portal.displayName || localUser.name,
+      email: localUser.email,
+      role: localUser.role,
+      authSource: 'portal' as const,
+      portalUserId: portal.user.id,
+    };
+
+    await setSessionCookie(sessionData);
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: localUser.id,
+          action: 'LOGIN',
+          details: `Usuário ${sessionData.name} logou no sistema (portal/operador, role=${localUser.role}).`,
+        },
+      });
+    } catch (auditError) {
+      console.error('Login audit log error (non-critical):', auditError);
+    }
+
+    return { ok: true as const, sessionData };
+  }
+
+  // ADMIN (and any non-portal operator): SHA-256 local
   const passwordHash = hashPassword(password);
   if (localUser.passwordHash !== passwordHash) {
     return {
@@ -162,7 +226,7 @@ export async function POST(request: Request) {
       if (result.ok) {
         return NextResponse.json({ success: true, user: result.sessionData });
       }
-      // Wrong local password — do not silently fall through to Portal for operators
+      // Wrong password — do not silently fall through to Portal for operators
       return NextResponse.json(
         { success: false, error: result.error },
         { status: result.status }

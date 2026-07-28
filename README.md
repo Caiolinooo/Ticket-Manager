@@ -69,8 +69,17 @@ Configurações adicionais ficam em **SystemConfig** (banco / Admin UI), não ne
 
 | Área | Fonte de credenciais |
 |------|----------------------|
-| **Operador (Admin / Agent)** | Tabela `ticket_support.SupportUser` (hash SHA-256 local) — use a aba **Operador** |
+| **Operador ADMIN** | Tabela `ticket_support.SupportUser` (hash SHA-256 local) — aba **Operador** |
+| **Operador TECHNICIAN** | Mesmas credenciais do Portal (`users_unified`, bcrypt) — aba **Operador**; o TM reconhece o `SupportUser` TECHNICIAN vinculado ao e-mail/`portalUserId` |
 | **Cliente** | Mesmas credenciais do Portal / EmployeeHub (`public.users_unified`, bcrypt) — aba **Cliente (Portal)** |
+
+### Técnicos (v1.3.1)
+
+1. Em **Admin → Configurações → Técnicos**, busque um usuário do Portal (nome/e-mail) e selecione.
+2. Não há senha local: o login do técnico é o do Portal.
+3. Configure `monitoredEmails`, `monitoredTeamsAccounts`, `receiveMode` e `active`.
+4. API de busca: `GET /api/settings/technicians/portal-users?q=` (ADMIN).
+5. Criação: `POST /api/settings/technicians` com `{ portalUserId | email, monitoredEmails?, … }` — sem `password`.
 
 Fluxo do client:
 

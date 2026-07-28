@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import {
-  hashPassword,
-  isValidEmail,
   normalizeReceiveMode,
   parseStringArray,
   requireAdmin,
@@ -21,6 +19,8 @@ const technicianSelect = {
   receiveMode: true,
   active: true,
   createdAt: true,
+  portalUserId: true,
+  authSource: true,
 } as const;
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -61,52 +61,20 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const body = await request.json();
     const data: {
-      name?: string;
-      email?: string;
-      passwordHash?: string;
       monitoredEmails?: string;
       monitoredTeamsAccounts?: string;
       receiveMode?: string;
       active?: boolean;
+      name?: string;
     } = {};
 
+    // Name/email/password come from Portal — allow optional name sync only
     if (body.name !== undefined) {
       const name = String(body.name || '').trim();
       if (!name) {
         return NextResponse.json({ success: false, error: 'Nome é obrigatório' }, { status: 400 });
       }
       data.name = name;
-    }
-
-    if (body.email !== undefined) {
-      const email = String(body.email || '').trim().toLowerCase();
-      if (!isValidEmail(email)) {
-        return NextResponse.json({ success: false, error: 'E-mail de login inválido' }, { status: 400 });
-      }
-      const clash = await prisma.supportUser.findFirst({
-        where: {
-          email: { equals: email, mode: 'insensitive' },
-          NOT: { id },
-        },
-      });
-      if (clash) {
-        return NextResponse.json(
-          { success: false, error: 'Já existe um usuário com este e-mail' },
-          { status: 409 }
-        );
-      }
-      data.email = email;
-    }
-
-    if (body.password !== undefined && body.password !== null && body.password !== '') {
-      const password = String(body.password);
-      if (password.length < 6) {
-        return NextResponse.json(
-          { success: false, error: 'Senha deve ter no mínimo 6 caracteres' },
-          { status: 400 }
-        );
-      }
-      data.passwordHash = hashPassword(password);
     }
 
     if (body.monitoredEmails !== undefined) {

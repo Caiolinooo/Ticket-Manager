@@ -11,10 +11,15 @@ generator client {
 model SupportUser {
   id                     String          @id @default(uuid())
   email                  String          @unique
+  /// SHA-256 local (ADMIN) ou marcador "portal-auth" (TECHNICIAN / EMPLOYEE via Portal)
   passwordHash           String
   name                   String
   role                   String          // "ADMIN" | "TECHNICIAN" | "EMPLOYEE" (legacy "AGENT" ≡ TECHNICIAN)
   microsoftUserId        String?
+  /// ID em public.users_unified (Portal / EmployeeHub)
+  portalUserId           String?
+  /// "local" | "portal" — técnicos novos usam portal
+  authSource             String?
   /// JSON string[] — caixas Exchange das quais o técnico recebe pendências
   monitoredEmails        String?
   /// JSON string[] — UPNs/contas Teams do técnico

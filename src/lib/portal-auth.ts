@@ -54,11 +54,6 @@ function normalizeHashedPassword(user: Pick<PortalUser, 'password' | 'passwordHa
   return user.password || user.passwordHash || null;
 }
 
-function displayName(user: PortalUser): string {
-  const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-  return name || user.email;
-}
-
 function isPortalUserAllowed(user: PortalUser): PortalAuthFailure | null {
   if (!user.active) {
     return {
@@ -143,6 +138,73 @@ export async function findPortalUserById(id: string): Promise<PortalUser | null>
   }
 }
 
+/** Public-safe portal user row (no password hashes). */
+export interface PortalUserSearchHit {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+  role: string;
+}
+
+/**
+ * Search Portal users by name/email for technician linking.
+ * Never returns password / password_hash.
+ */
+export async function searchPortalUsers(
+  query: string,
+  limit = 20
+): Promise<PortalUserSearchHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const capped = Math.min(Math.max(limit, 1), 50);
+  const like = `%${q.replace(/[%_]/g, '\\$&')}%`;
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, email, first_name, last_name, role, active
+      FROM public.users_unified
+      WHERE email IS NOT NULL
+        AND TRIM(email) <> ''
+        AND (
+          email ILIKE $1 ESCAPE '\\'
+          OR first_name ILIKE $1 ESCAPE '\\'
+          OR last_name ILIKE $1 ESCAPE '\\'
+          OR CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) ILIKE $1 ESCAPE '\\'
+        )
+      ORDER BY active DESC, last_name ASC NULLS LAST, first_name ASC NULLS LAST, email ASC
+      LIMIT $2
+      `,
+      [like, capped]
+    );
+
+    return result.rows.map((row: Record<string, unknown>) => {
+      const first = String(row.first_name || '');
+      const last = String(row.last_name || '');
+      const name = `${first} ${last}`.trim() || String(row.email || '');
+      return {
+        id: String(row.id),
+        name,
+        email: String(row.email || '').trim().toLowerCase(),
+        active: Boolean(row.active),
+        role: String(row.role || 'USER'),
+      };
+    });
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Marker stored in SupportUser.passwordHash when auth is delegated to Portal. */
+export const PORTAL_AUTH_MARKER = 'portal-auth';
+
+export function portalDisplayName(user: Pick<PortalUser, 'firstName' | 'lastName' | 'email'>): string {
+  const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+  return name || user.email;
+}
+
 export async function authenticatePortalUser(
   email: string,
   password: string
@@ -169,7 +231,7 @@ export async function authenticatePortalUser(
     return { ok: false, error: 'Credenciais inválidas', status: 401 };
   }
 
-  return { ok: true, user, displayName: displayName(user) };
+  return { ok: true, user, displayName: portalDisplayName(user) };
 }
 
 export function getPortalJwtSecret(): string | null {
@@ -198,7 +260,7 @@ export function verifyPortalJwt(token: string): PortalJwtPayload | null {
  */
 export async function ensureEmployeeFromPortal(user: PortalUser) {
   const email = user.email.trim().toLowerCase();
-  const name = displayName(user);
+  const name = portalDisplayName(user);
 
   const existing = await prisma.supportUser.findFirst({
     where: { email: { equals: email, mode: 'insensitive' } },
@@ -209,10 +271,15 @@ export async function ensureEmployeeFromPortal(user: PortalUser) {
     if (op === 'ADMIN' || op === 'TECHNICIAN' || op === 'AGENT') {
       return existing;
     }
-    if (existing.name !== name) {
+    if (existing.name !== name || existing.portalUserId !== user.id) {
       return prisma.supportUser.update({
         where: { id: existing.id },
-        data: { name },
+        data: {
+          name,
+          portalUserId: user.id,
+          authSource: 'portal',
+          passwordHash: PORTAL_AUTH_MARKER,
+        },
       });
     }
     return existing;
@@ -223,7 +290,9 @@ export async function ensureEmployeeFromPortal(user: PortalUser) {
       email,
       name,
       role: 'EMPLOYEE',
-      passwordHash: 'portal-auth',
+      passwordHash: PORTAL_AUTH_MARKER,
+      portalUserId: user.id,
+      authSource: 'portal',
     },
   });
 }
@@ -251,6 +320,6 @@ export async function resolvePortalSessionFromToken(token: string) {
     ok: true as const,
     portalUser,
     employee,
-    displayName: displayName(portalUser),
+    displayName: portalDisplayName(portalUser),
   };
 }

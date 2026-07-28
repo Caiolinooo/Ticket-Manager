@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import {
-  hashPassword,
-  isValidEmail,
+  findPortalUserByEmail,
+  findPortalUserById,
+  portalDisplayName,
+  PORTAL_AUTH_MARKER,
+} from '@/lib/portal-auth';
+import {
   normalizeReceiveMode,
   requireAdmin,
   serializeStringArray,
@@ -20,6 +24,8 @@ const technicianSelect = {
   receiveMode: true,
   active: true,
   createdAt: true,
+  portalUserId: true,
+  authSource: true,
 } as const;
 
 export async function GET() {
@@ -43,29 +49,26 @@ export async function GET() {
   }
 }
 
+/**
+ * Create technician from a Portal user (no local password).
+ * Body: { portalUserId | email, monitoredEmails?, monitoredTeamsAccounts?, receiveMode?, active? }
+ */
 export async function POST(request: Request) {
   try {
     const { session, error } = await requireAdmin();
     if (error) return error;
 
     const body = await request.json();
-    const name = String(body.name || '').trim();
-    const email = String(body.email || '').trim().toLowerCase();
-    const password = String(body.password || '');
+    const portalUserId = body.portalUserId ? String(body.portalUserId).trim() : '';
+    const emailHint = body.email ? String(body.email).trim().toLowerCase() : '';
     const monitoredEmails = serializeStringArray(body.monitoredEmails);
     const monitoredTeamsAccounts = serializeStringArray(body.monitoredTeamsAccounts);
     const receiveMode = normalizeReceiveMode(body.receiveMode);
     const active = body.active === false ? false : true;
 
-    if (!name) {
-      return NextResponse.json({ success: false, error: 'Nome é obrigatório' }, { status: 400 });
-    }
-    if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ success: false, error: 'E-mail de login inválido' }, { status: 400 });
-    }
-    if (!password || password.length < 6) {
+    if (!portalUserId && !emailHint) {
       return NextResponse.json(
-        { success: false, error: 'Senha obrigatória (mínimo 6 caracteres)' },
+        { success: false, error: 'Selecione um usuário do Portal (portalUserId ou email)' },
         { status: 400 }
       );
     }
@@ -82,22 +85,85 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: teamsErr }, { status: 400 });
     }
 
+    const portalUser = portalUserId
+      ? await findPortalUserById(portalUserId)
+      : await findPortalUserByEmail(emailHint);
+
+    if (!portalUser || !portalUser.email) {
+      return NextResponse.json(
+        { success: false, error: 'Usuário do Portal não encontrado' },
+        { status: 404 }
+      );
+    }
+    if (!portalUser.active) {
+      return NextResponse.json(
+        { success: false, error: 'Usuário do Portal está desativado' },
+        { status: 400 }
+      );
+    }
+
+    const email = portalUser.email.trim().toLowerCase();
+    const name = portalDisplayName(portalUser);
+
     const existing = await prisma.supportUser.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },
     });
+
     if (existing) {
-      return NextResponse.json(
-        { success: false, error: 'Já existe um usuário com este e-mail' },
-        { status: 409 }
-      );
+      const role = (existing.role || '').toUpperCase();
+      if (role === 'ADMIN') {
+        return NextResponse.json(
+          { success: false, error: 'Este e-mail pertence a um administrador local' },
+          { status: 409 }
+        );
+      }
+      if (role === 'TECHNICIAN' || role === 'AGENT') {
+        return NextResponse.json(
+          { success: false, error: 'Já existe um técnico com este e-mail' },
+          { status: 409 }
+        );
+      }
+
+      // Promote EMPLOYEE (or other) → TECHNICIAN linked to Portal
+      const promoted = await prisma.supportUser.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          role: 'TECHNICIAN',
+          passwordHash: PORTAL_AUTH_MARKER,
+          portalUserId: portalUser.id,
+          authSource: 'portal',
+          monitoredEmails,
+          monitoredTeamsAccounts,
+          receiveMode,
+          active,
+        },
+        select: technicianSelect,
+      });
+
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: session!.id,
+            action: 'TECHNICIAN_CREATE',
+            details: `Técnico promovido do Portal: ${promoted.name} <${promoted.email}> (portalUserId=${portalUser.id}, receiveMode=${receiveMode}).`,
+          },
+        });
+      } catch (auditError) {
+        console.error('Technician create audit error (non-critical):', auditError);
+      }
+
+      return NextResponse.json({ success: true, technician: toTechnicianDto(promoted) }, { status: 201 });
     }
 
     const created = await prisma.supportUser.create({
       data: {
         name,
         email,
-        passwordHash: hashPassword(password),
+        passwordHash: PORTAL_AUTH_MARKER,
         role: 'TECHNICIAN',
+        portalUserId: portalUser.id,
+        authSource: 'portal',
         monitoredEmails,
         monitoredTeamsAccounts,
         receiveMode,
@@ -111,7 +177,7 @@ export async function POST(request: Request) {
         data: {
           userId: session!.id,
           action: 'TECHNICIAN_CREATE',
-          details: `Técnico criado: ${created.name} <${created.email}> (receiveMode=${receiveMode}).`,
+          details: `Técnico criado do Portal: ${created.name} <${created.email}> (portalUserId=${portalUser.id}, receiveMode=${receiveMode}).`,
         },
       });
     } catch (auditError) {

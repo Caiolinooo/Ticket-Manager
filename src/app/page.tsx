@@ -131,7 +131,7 @@ export default function LoginPage() {
             Plataforma Inteligente de Chamados e Auditoria
           </p>
           <p className="mt-3 text-xs text-slate-500 max-w-sm">
-            Cliente: credenciais do Portal (EmployeeHub). Operador: credenciais locais do Ticket-Manager.
+            Cliente: credenciais do Portal. Operador ADMIN: local. Operador técnico: mesmas credenciais do Portal.
           </p>
         </div>
 
