@@ -20,12 +20,19 @@ expressamente autorizados pelo autor, no âmbito da operação do projeto Ticket
 1. Copiar, reproduzir ou redistribuir o software, no todo ou em parte;
 2. Sublicenciar, ceder, alugar, emprestar ou disponibilizar a terceiros;
 3. Vender, comercializar ou explorar comercialmente o software ou derivados;
-4. Realizar engenharia reversa com finalidade comercial ou competitória;
+4. Realizar engenharia reversa com finalidade comercial ou competitiva;
 5. Remover ou alterar avisos de copyright, autoria ou esta licença;
 6. Usar o software fora do escopo interno autorizado (incluindo uso comercial
    por terceiros).
 
 Qualquer autorização deve ser concedida **por escrito** pelo autor.
+
+### Dependências de terceiros
+
+O projeto pode incluir ou depender de bibliotecas open-source (via npm).
+Essas dependências permanecem sob as respectivas licenças dos seus autores;
+esta licença proprietária aplica-se ao código e artefatos do Ticket Manager,
+não substitui nem altera as licenças das dependências.
 
 ### Sem garantia
 
@@ -53,5 +60,8 @@ authorized by the author for Ticket Manager operations.
 Without prior written authorization from the author, you may not: copy,
 redistribute, sublicense, sell, commercially exploit, or reverse-engineer for
 commercial purposes this software or derivatives.
+
+Third-party open-source dependencies (npm) remain under their own licenses.
+This proprietary license covers Ticket Manager code and artifacts only.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

@@ -2,9 +2,9 @@
 
 Sistema de gestão de tickets de suporte que coleta mensagens de **Microsoft Exchange (e-mail)** e **Microsoft Teams** via Microsoft Graph, tria com IA e organiza o fluxo de aprovação/atendimento.
 
-**Versão:** 1.2.1  
+**Versão:** 1.3.2  
 **Autor:** Caio Correia  
-**Licença:** Proprietária — ver [LICENSE](./LICENSE)
+**Licença:** Proprietária — ver [LICENSE](./LICENSE) · mudanças em [CHANGELOG.md](./CHANGELOG.md)
 
 ---
 
@@ -18,6 +18,8 @@ Principais capacidades:
 - Sync de chats e canais Teams (`Chat.Read.All`, `ChannelMessage.Read.All`, `Team.ReadBasic.All`)
 - Triagem IA com prioridade Gemini → Custom AI → Mock
 - Painel Admin (configuração, sync manual, revisão de traces)
+- Operadores ADMIN e TECHNICIAN (técnicos via Portal)
+- Relatórios & KPIs unificados do setor (SLA, MTTR, MTTFR, export Excel)
 - Persistência PostgreSQL (Prisma)
 
 ---
@@ -89,6 +91,40 @@ Fluxo do client:
 4. API: `POST /api/auth/login` aceita `area: "client" | "admin" | "auto"`.
 
 Smoke local: `node scripts/smoke-portal-auth.mjs` (opcional: `PORTAL_TEST_EMAIL` + `PORTAL_TEST_PASSWORD`).
+
+---
+
+## Relatórios & KPIs
+
+Disponível em **Admin → Relatórios & KPIs** (dados setoriais para ADMIN e TECHNICIAN). O motor compartilhado fica em `src/lib/kpi-metrics.ts` e alimenta a UI, `GET /api/kpi` e o export Excel (`GET /api/export`).
+
+### Onde olhar na UI
+
+1. Faça login como operador.
+2. Abra a aba **Relatórios & KPIs**.
+3. Escolha o período: Hoje, 7d, 30d, 90d ou intervalo customizado.
+4. Confira cards (total, resolução, MTTR, compliance SLA, estouros, backlog, MTTFR) e breakdowns por técnico / prioridade / SLA.
+5. Exporte Excel — as abas de resumo/KPIs usam as mesmas fórmulas.
+
+### Definições
+
+| Métrica | Significado |
+|---------|-------------|
+| **SLA de resolução** | Meta por prioridade (tempo corrido, não horário comercial): Urgente/Alta **2h**, Média **24h**, Baixa **72h**. |
+| **Cumprido** | Ticket resolvido/fechado dentro da meta. |
+| **Estourado** | Aberto além da meta, ou resolvido após a meta. |
+| **No prazo** | Ainda aberto e dentro da meta — **não** entra no denominador da compliance. |
+| **Compliance SLA %** | `cumpridos ÷ (cumpridos + estourados) × 100`. |
+| **MTTR** | Média de `(resolvedAt − createdAt)` nos tickets Resolvidos/Fechados com data válida. |
+| **MTTFR** | Média até a primeira mensagem de um remetente diferente do solicitante; sem resposta de agente, o ticket fica de fora da média. |
+
+Fuso usado nos rótulos de período: `America/Fortaleza` (UTC−3).
+
+### Smoke das fórmulas
+
+```bash
+node scripts/smoke-kpi-metrics.mjs
+```
 
 ---
 
@@ -223,15 +259,22 @@ src/
     api/
       integrations/        # exchange, teams, approve, ignore, pending
       tickets/             # CRUD tickets + messages
+      kpi/                  # Relatórios setoriais (SLA/MTTR/MTTFR)
+      export/               # Excel alinhado ao motor de KPIs
       settings/            # SystemConfig
       ai/                  # suggest-fix
       auth/                # login / me / logout
+  components/
+    kpi-dashboard.tsx      # UI Relatórios & KPIs
   lib/
     ai.ts                  # Gemini → Custom → Mock
+    kpi-metrics.ts         # Motor compartilhado SLA/MTTR/MTTFR
     microsoft.ts           # Graph token + coleta
     db.ts                  # Prisma / PostgreSQL
 prisma/                    # Schema Prisma
 LICENSE                    # Licença proprietária
+CHANGELOG.md               # Histórico de versões
+scripts/smoke-kpi-metrics.mjs
 tasks.md                   # Checklist de alto nível
 ```
 
@@ -239,9 +282,11 @@ tasks.md                   # Checklist de alto nível
 
 ## Licença
 
-Software **proprietário**. Cópia, redistribuição, venda e uso comercial sem autorização escrita do autor (**Caio Correia**) são proibidos. Uso interno apenas por pessoas autorizadas pelo autor.
+Software **proprietário** (`package.json` → `"license": "SEE LICENSE IN LICENSE"`). Cópia, redistribuição, venda e uso comercial sem autorização escrita do autor (**Caio Correia**) são proibidos. Uso interno apenas por pessoas autorizadas pelo autor.
 
 Detalhes: [LICENSE](./LICENSE)
+
+Dependências de terceiros (`node_modules`) permanecem sob as licenças dos respectivos pacotes; este repositório não redistribui o código-fonte delas.
 
 ---
 
@@ -266,6 +311,7 @@ pm2 logs ticket-manager --lines 100
 
 ## Versionamento
 
-- Semântico em `package.json` (`1.0.1`)
-- Tags Git: `v1.0.1`, …
+- Semântico em `package.json` (atual: **1.3.2**)
+- Tags Git: `v1.3.2`, …
+- Histórico: [CHANGELOG.md](./CHANGELOG.md)
 - Repositório privado no GitHub (conta do mantenedor)

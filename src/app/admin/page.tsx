@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LogOut, MessageSquare, AlertCircle, CheckCircle, Clock, Send, 
   ShieldAlert, User, Cpu, Sparkles, Filter, Search, Download, 
   RefreshCw, Bot, Check, X, BarChart3, Database, MessageSquareWarning, 
-  Settings2, Calendar, TrendingUp, TrendingDown, Minus, ChevronRight,
-  FileSpreadsheet, Zap, Wrench, Pencil, UserPlus
+  Settings2, ChevronRight,
+  Zap, Wrench, Pencil, UserPlus
 } from 'lucide-react';
 import {
   canAccessOperatorArea,
@@ -16,6 +16,7 @@ import {
   roleDisplayLabel,
 } from '@/lib/permissions';
 import { RoleBadge } from '@/components/permission-gates';
+import { KpiDashboard } from '@/components/kpi-dashboard';
 
 interface UserInfo {
   id: string;
@@ -81,6 +82,7 @@ interface Ticket {
   resolution?: string | null;
   source: string;
   externalReferenceId?: string | null;
+  createdById?: string | null;
   assignedToId?: string | null;
   createdAt: string;
   resolvedAt?: string;
@@ -88,8 +90,6 @@ interface Ticket {
   assignee?: { id: string; name: string; email: string };
   messages: Message[];
 }
-
-type DatePreset = 'today' | '7d' | '30d' | '90d' | 'custom';
 
 function getInitials(name: string): string {
   if (!name) return '?';
@@ -188,93 +188,10 @@ export default function AdminDashboard() {
   const [resolutionText, setResolutionText] = useState('');
   const [pendingCloseStatus, setPendingCloseStatus] = useState<string | null>(null);
 
-  // ── KPI Date Filters ──────────────────────────────────────────────────────
-  const [kpiPreset, setKpiPreset] = useState<DatePreset>('30d');
-  const [kpiDateFrom, setKpiDateFrom] = useState('');
-  const [kpiDateTo, setKpiDateTo] = useState('');
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Compute effective from/to dates based on preset
-  const effectiveDates = useMemo(() => {
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-
-    if (kpiPreset === 'today') {
-      return { from: todayStr, to: todayStr };
-    } else if (kpiPreset === '7d') {
-      const from = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      return { from, to: todayStr };
-    } else if (kpiPreset === '30d') {
-      const from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      return { from, to: todayStr };
-    } else if (kpiPreset === '90d') {
-      const from = new Date(now.getTime() - 89 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      return { from, to: todayStr };
-    } else {
-      // custom
-      return { from: kpiDateFrom, to: kpiDateTo };
-    }
-  }, [kpiPreset, kpiDateFrom, kpiDateTo]);
-
-  // KPI always uses sector-wide tickets (unified for ADMIN and TECHNICIAN)
-  const kpiTickets = useMemo(() => {
-    const source = sectorTickets.length > 0 ? sectorTickets : tickets;
-    if (!effectiveDates.from && !effectiveDates.to) return source;
-    return source.filter(t => {
-      const created = new Date(t.createdAt);
-      const from = effectiveDates.from ? new Date(effectiveDates.from + 'T00:00:00') : null;
-      const to = effectiveDates.to ? new Date(effectiveDates.to + 'T23:59:59') : null;
-      if (from && created < from) return false;
-      if (to && created > to) return false;
-      return true;
-    });
-  }, [sectorTickets, tickets, effectiveDates]);
-
-  // KPI calculations (based on filtered tickets)
-  const totalTicketsCount = kpiTickets.length;
-  const resolvedCount = kpiTickets.filter(t => t.status === 'RESOLVED' || t.status === 'CLOSED').length;
-  const openCount = kpiTickets.filter(t => t.status === 'OPEN').length;
-  const inProgressCount = kpiTickets.filter(t => t.status === 'IN_PROGRESS').length;
-
-  // MTTR
-  const resolvedWithTime = kpiTickets.filter(t => (t.status === 'RESOLVED' || t.status === 'CLOSED') && t.resolvedAt);
-  let mttrHours = '0.0';
-  if (resolvedWithTime.length > 0) {
-    const totalMs = resolvedWithTime.reduce((acc, t) => {
-      const start = new Date(t.createdAt).getTime();
-      const end = new Date(t.resolvedAt!).getTime();
-      return acc + (end - start);
-    }, 0);
-    mttrHours = (totalMs / (resolvedWithTime.length * 1000 * 60 * 60)).toFixed(1);
-  }
-
-  // SLA Breaches (High/Urgent open for > 2 hours)
-  const slaBreaches = kpiTickets.filter(t => {
-    if (t.status === 'RESOLVED' || t.status === 'CLOSED') return false;
-    if (t.priority !== 'HIGH' && t.priority !== 'URGENT') return false;
-    const ageMs = Date.now() - new Date(t.createdAt).getTime();
-    return ageMs > 1000 * 60 * 120;
-  }).length;
-
-  // Resolution rate
-  const resolutionRate = totalTicketsCount > 0
-    ? ((resolvedCount / totalTicketsCount) * 100).toFixed(0)
-    : '0';
-
-  // Category distribution
-  const categories = ['Hardware', 'Software', 'Acessos', 'Redes', 'Geral'];
-  const categoryCounts = categories.map(cat => kpiTickets.filter(t => t.category === cat).length);
-  const totalCatSum = categoryCounts.reduce((a, b) => a + b, 0);
-
-  // Status distributions
-  const statuses = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
-  const statusCounts = statuses.map(s => kpiTickets.filter(t => t.status === s).length);
-
-  // Source distribution
-  const sources = ['PORTAL', 'TEAMS', 'EMAIL'];
-  const sourceLabels = ['Portal', 'Teams', 'E-mail'];
-  const sourceCounts = sources.map(s => kpiTickets.filter(t => t.source === s).length);
+  /** Sector-wide tickets for Relatórios & KPIs (fallback: operator mailbox tickets). */
+  const kpiSourceTickets = sectorTickets.length > 0 ? sectorTickets : tickets;
 
   const loadSettings = async () => {
     try {
@@ -831,11 +748,10 @@ export default function AdminDashboard() {
     }
   };
 
-  // Build export URL with active date filters
-  const buildExportUrl = () => {
+  const buildExportUrl = (from: string, to: string) => {
     const params = new URLSearchParams();
-    if (effectiveDates.from) params.set('dateFrom', effectiveDates.from);
-    if (effectiveDates.to) params.set('dateTo', effectiveDates.to);
+    if (from) params.set('dateFrom', from);
+    if (to) params.set('dateTo', to);
     const qs = params.toString();
     return `/api/export${qs ? '?' + qs : ''}`;
   };
@@ -884,14 +800,6 @@ export default function AdminDashboard() {
       PENDING: 'bg-yellow-400',
     };
     return <span className={`inline-block h-2 w-2 rounded-full ${colors[status] || 'bg-slate-400'} shrink-0`} />;
-  };
-
-  const presetLabel: Record<DatePreset, string> = {
-    today: 'Hoje',
-    '7d': '7 dias',
-    '30d': '30 dias',
-    '90d': '90 dias',
-    custom: 'Personalizado',
   };
 
   return (
@@ -1463,263 +1371,13 @@ export default function AdminDashboard() {
 
           {/* TAB 3: KPIS & RELATORIOS */}
           {activeTab === 'kpis' && (
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto text-left max-w-6xl mx-auto w-full space-y-6">
-              
-              {/* Header */}
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 border-b border-white/5 pb-5">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-indigo-500" /> Relatórios de Suporte e KPIs
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Totais unificados do setor (iguais para Admin e Técnico). Filtre por período e exporte em Excel.
-                  </p>
-                </div>
-
-                {/* Export button */}
-                <a
-                  href={buildExportUrl()}
-                  download
-                  className="flex items-center gap-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-emerald-600/15 whitespace-nowrap shrink-0"
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Exportar Excel com Filtro
-                </a>
-              </div>
-
-              {/* Date filter row */}
-              <div className="glass-card rounded-2xl p-4 border border-white/5 flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-                  <Calendar className="h-4 w-4 text-indigo-400" />
-                  Período:
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(['today', '7d', '30d', '90d', 'custom'] as DatePreset[]).map(preset => (
-                    <button
-                      key={preset}
-                      onClick={() => setKpiPreset(preset)}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer border ${
-                        kpiPreset === preset
-                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
-                          : 'bg-slate-950 border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10'
-                      }`}
-                    >
-                      {presetLabel[preset]}
-                    </button>
-                  ))}
-                </div>
-
-                {kpiPreset === 'custom' && (
-                  <div className="flex items-center gap-2 ml-1">
-                    <input
-                      type="date"
-                      value={kpiDateFrom}
-                      onChange={e => setKpiDateFrom(e.target.value)}
-                      className="px-3 py-1.5 bg-slate-950 border border-white/5 rounded-lg text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                    <span className="text-slate-500 text-xs">até</span>
-                    <input
-                      type="date"
-                      value={kpiDateTo}
-                      onChange={e => setKpiDateTo(e.target.value)}
-                      className="px-3 py-1.5 bg-slate-950 border border-white/5 rounded-lg text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                  </div>
-                )}
-
-                <span className="ml-auto text-[10px] text-slate-500 font-semibold">
-                  {totalTicketsCount} ticket(s) no período
-                </span>
-              </div>
-
-              {/* KPI Cards Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Total */}
-                <div className="glass-card rounded-2xl p-5 border border-white/5 text-left space-y-1">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total de Tickets</p>
-                  <p className="text-3xl font-extrabold text-white">{totalTicketsCount}</p>
-                  <p className="text-[10px] text-slate-400">
-                    {openCount} aberto(s) · {inProgressCount} em andamento
-                  </p>
-                </div>
-                {/* Resolution Rate */}
-                <div className="glass-card rounded-2xl p-5 border border-white/5 text-left space-y-1">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Taxa de Resolução</p>
-                  <p className={`text-3xl font-extrabold ${parseInt(resolutionRate) >= 80 ? 'text-emerald-400' : parseInt(resolutionRate) >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
-                    {resolutionRate}%
-                  </p>
-                  <p className="text-[10px] text-slate-400">{resolvedCount} resolvido(s)/fechado(s)</p>
-                </div>
-                {/* MTTR */}
-                <div className="glass-card rounded-2xl p-5 border border-white/5 text-left space-y-1">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">MTTR</p>
-                  <p className="text-3xl font-extrabold text-indigo-400">{mttrHours}h</p>
-                  <p className="text-[10px] text-slate-400">Tempo médio de resolução</p>
-                </div>
-                {/* SLA Breaches */}
-                <div className="glass-card rounded-2xl p-5 border border-white/5 text-left space-y-1 relative overflow-hidden">
-                  {slaBreaches > 0 && <div className="absolute top-2 right-2 h-2 w-2 bg-red-500 pulse-indicator rounded-full" />}
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Estouro de SLA</p>
-                  <p className={`text-3xl font-extrabold ${slaBreaches > 0 ? 'text-red-400' : 'text-white'}`}>{slaBreaches}</p>
-                  <p className="text-[10px] text-slate-400">Alta/Urgente abertos &gt; 2h</p>
-                </div>
-              </div>
-
-              {/* Charts row */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* Pie Chart: Categories */}
-                <div className="glass-card rounded-2xl p-6 border border-white/5 text-left flex flex-col h-[360px]">
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Volume por Categoria</h3>
-                  <div className="flex-1 flex items-center justify-center relative">
-                    {totalCatSum === 0 ? (
-                      <div className="text-center text-slate-600 text-xs">
-                        <BarChart3 className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                        Sem dados no período
-                      </div>
-                    ) : (
-                      <svg width="200" height="200" viewBox="-100 -100 200 200" className="transform -rotate-90">
-                        {(() => {
-                          let cumulativeAngle = 0;
-                          const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#6b7280'];
-                          return categoryCounts.map((count, i) => {
-                            if (count === 0) return null;
-                            const percentage = count / totalCatSum;
-                            const angle = percentage * 360;
-                            const startAngle = cumulativeAngle;
-                            const endAngle = cumulativeAngle + angle;
-                            cumulativeAngle = endAngle;
-
-                            const rad = Math.PI / 180;
-                            const x1 = 85 * Math.cos(startAngle * rad);
-                            const y1 = 85 * Math.sin(startAngle * rad);
-                            const x2 = 85 * Math.cos(endAngle * rad);
-                            const y2 = 85 * Math.sin(endAngle * rad);
-                            const largeArc = angle > 180 ? 1 : 0;
-
-                            return (
-                              <path
-                                key={i}
-                                d={`M 0 0 L ${x1} ${y1} A 85 85 0 ${largeArc} 1 ${x2} ${y2} Z`}
-                                fill={colors[i % colors.length]}
-                                stroke="#030712"
-                                strokeWidth="2.5"
-                                className="transition-all duration-300 hover:opacity-90"
-                              />
-                            );
-                          });
-                        })()}
-                        <circle r="48" fill="#030712" />
-                        {/* Center text via foreignObject workaround */}
-                      </svg>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/5 text-[10px] text-slate-400 font-semibold">
-                    {[
-                      { label: 'Hardware', color: '#6366f1', count: categoryCounts[0] },
-                      { label: 'Software', color: '#8b5cf6', count: categoryCounts[1] },
-                      { label: 'Acessos', color: '#10b981', count: categoryCounts[2] },
-                      { label: 'Redes', color: '#f59e0b', count: categoryCounts[3] },
-                      { label: 'Geral', color: '#6b7280', count: categoryCounts[4] },
-                    ].map(({ label, color, count }) => (
-                      <div key={label} className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                        {label} ({count})
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Bar Chart: Status */}
-                <div className="glass-card rounded-2xl p-6 border border-white/5 text-left flex flex-col h-[360px]">
-                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Volume por Status</h3>
-                  <div className="flex-1 flex flex-col justify-center space-y-4 px-2">
-                    {statuses.map((status, i) => {
-                      const count = statusCounts[i];
-                      const maxCount = Math.max(...statusCounts, 1);
-                      const pct = (count / maxCount) * 100;
-                      const colorMap: Record<string, string> = {
-                        OPEN: 'from-sky-500 to-indigo-500',
-                        IN_PROGRESS: 'from-yellow-500 to-amber-500',
-                        RESOLVED: 'from-emerald-500 to-teal-500',
-                        CLOSED: 'from-slate-500 to-gray-500',
-                      };
-                      return (
-                        <div key={status} className="space-y-1.5">
-                          <div className="flex justify-between text-[11px] font-bold text-slate-300">
-                            <span className="flex items-center gap-1.5">{getStatusDot(status)} {getStatusText(status)}</span>
-                            <span>{count} ({totalTicketsCount > 0 ? ((count / totalTicketsCount) * 100).toFixed(0) : 0}%)</span>
-                          </div>
-                          <div className="h-3 w-full bg-slate-950 border border-white/5 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full bg-gradient-to-r ${colorMap[status] || 'from-indigo-600 to-violet-600'} rounded-full transition-all duration-700`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Source mini breakdown */}
-                  <div className="mt-4 pt-4 border-t border-white/5">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Por Canal de Origem</p>
-                    <div className="flex gap-3">
-                      {sources.map((src, i) => (
-                        <div key={src} className="flex-1 text-center">
-                          <p className="text-lg font-extrabold text-white">{sourceCounts[i]}</p>
-                          <p className="text-[10px] text-slate-500">{sourceLabels[i]}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent tickets table */}
-              {kpiTickets.length > 0 && (
-                <div className="glass-card rounded-2xl border border-white/5 overflow-hidden">
-                  <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Tickets Recentes no Período</h3>
-                    <span className="text-[10px] text-slate-500">{Math.min(kpiTickets.length, 10)} de {kpiTickets.length}</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-white/5 bg-slate-950/40">
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Título</th>
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Categoria</th>
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Prioridade</th>
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Status</th>
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Solicitante</th>
-                          <th className="text-left px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase">Abertura</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {kpiTickets.slice(0, 10).map((t, i) => (
-                          <tr key={t.id} className={`border-b border-white/5 hover:bg-white/2.5 transition-colors ${i % 2 === 0 ? '' : 'bg-white/[0.01]'}`}>
-                            <td className="px-4 py-2.5 text-slate-200 font-medium max-w-[200px] truncate">{t.title}</td>
-                            <td className="px-4 py-2.5 text-slate-400">{t.category}</td>
-                            <td className="px-4 py-2.5">{getPriorityBadge(t.priority)}</td>
-                            <td className="px-4 py-2.5">
-                              <span className="flex items-center gap-1.5">
-                                {getStatusDot(t.status)}
-                                {getStatusText(t.status)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-400">{t.creator.name}</td>
-                            <td className="px-4 py-2.5 text-slate-500 text-[10px]">
-                              {new Date(t.createdAt).toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' })}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-            </div>
+            <KpiDashboard
+              tickets={kpiSourceTickets}
+              buildExportUrl={buildExportUrl}
+              getPriorityBadge={getPriorityBadge}
+              getStatusDot={getStatusDot}
+              getStatusText={getStatusText}
+            />
           )}
 
           {/* TAB 4: SIMULADOR DE INJEÇÃO */}

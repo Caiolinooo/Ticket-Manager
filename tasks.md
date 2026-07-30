@@ -1,11 +1,57 @@
 # Ticket-Manager — Tarefas de alto nível
 
-Atualizado: 2026-07-28
+Atualizado: 2026-07-30
 
 ## Legenda
 
 - `[x]` feito
 - `[ ]` pendente
+- `[~]` em progresso
+
+---
+
+## 10. Relatórios & KPIs (SLA + MTTR) — concluído (código)
+
+### Objetivo
+Melhorar a aba Relatórios & KPIs com métricas corretas de SLA/MTTR, filtros de período, breakdowns operacionais e UI mais clara — sem inventar estética nova.
+
+### Definições (fonte da verdade em `src/lib/kpi-metrics.ts`)
+- **MTTR**: média de `(resolvedAt − createdAt)` em tickets `RESOLVED`/`CLOSED` com `resolvedAt` válido e ≥ `createdAt`. Tempo corrido (não horário comercial).
+- **SLA (tempo até resolução) por prioridade**:
+  - `URGENT` / `HIGH`: 2h (comportamento legado do app)
+  - `MEDIUM`: 24h
+  - `LOW`: 72h
+- **SLA met / breached / within**:
+  - Resolvido: met se duração ≤ meta; senão breached
+  - Aberto: breached se idade > meta; senão within (ainda no prazo)
+- **Compliance %**: `met / (met + breached) × 100` (exclui `within` do denominador)
+- **MTTFR** (1ª resposta): média até a 1ª mensagem de remetente ≠ criador; se sem mensagem de agente, não entra na média
+
+### Checklist
+- [x] Criar `src/lib/kpi-metrics.ts` (cálculos puros + labels PT)
+- [x] Enriquecer `GET /api/kpi` com summary/breakdowns/trends + filtro de datas
+- [x] Atualizar export Excel para as mesmas definições
+- [x] Extrair/melhorar UI `KpiDashboard` (cards, tooltips, charts, técnicos, SLA)
+- [x] Integrar na aba admin `kpis`
+- [x] Smoke unitário `scripts/smoke-kpi-metrics.mjs` (OK)
+- [x] Typecheck (`tsc --noEmit`) OK nos arquivos tocados
+- [x] Commit com CHANGELOG / README / LICENSE (deploy já feito via rsync; push não solicitado)
+
+### Verificação manual
+1. Login operador → Admin → Relatórios & KPIs
+2. Alternar Hoje / 7d / 30d / 90d / custom
+3. Conferir cards: Total, Resolução, MTTR, Compliance SLA, Estouros, Backlog, MTTFR
+4. Ver breakdowns por técnico / prioridade / met vs breached
+5. Exportar Excel e checar abas Resumo/KPIs alinhadas às mesmas fórmulas
+
+---
+
+## 10b. Release Relatórios & KPIs (v1.3.2)
+
+- [x] CHANGELOG.md + README + LICENSE (deps de terceiros)
+- [x] Bump `1.3.2`
+- [x] Commit local (código KPIs + docs)
+- [x] Deploy server já feito via rsync (PM2 online; tag/push não solicitados)
 
 ---
 
@@ -50,7 +96,6 @@ Atualizado: 2026-07-28
 #### API (ADMIN only)
 
 - `GET/POST /api/settings/technicians` (POST: `{ portalUserId \| email, … }` — sem senha)
-- `GET /api/settings/technicians/portal-users?q=` — busca Portal
 - `GET/PATCH/DELETE /api/settings/technicians/[id]` (DELETE → `active=false`)
 
 ### 9.1 Foundation (este agente) — schema + settings UI/API
@@ -243,7 +288,7 @@ Atualizado: 2026-07-28
 - Faltava distinguir continuação do mesmo atendimento vs atendimento novo.
 
 ### 7.1 Agrupamento / contexto
-- [x] `conversationId` + `memberIds` em `ExternalTrace` (schema + migration + script SQL)
+- [x] `conversationId` + `memberIds` em `ExternalTrace` (schema + migration + script)
 - [x] Coleta Teams/Exchange preenche `conversationId` (chatId / canal / email+assunto)
 - [x] `src/lib/trace-grouping.ts`: cluster por chat + remetente + janela 45 min
 - [x] Concatenar histórico no `rawContent` (`[Contexto agrupado — N mensagem(ns)]`)

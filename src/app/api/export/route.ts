@@ -3,31 +3,42 @@ import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { canAccessOperatorArea } from '@/lib/permissions';
 import * as XLSX from 'xlsx';
+import {
+  computeKpiReport,
+  evaluateSla,
+  formatDurationHours,
+  getSlaTargetLabel,
+  PRIORITY_LABEL_PT,
+  SOURCE_LABEL_PT,
+  STATUS_LABEL_PT,
+  resolutionDurationMs,
+  type KpiTicketInput,
+} from '@/lib/kpi-metrics';
 
 // Priority labels PT-BR
 const PRIORITY_LABEL: Record<string, string> = {
-  LOW: 'Baixa',
-  MEDIUM: 'Média',
-  HIGH: 'Alta',
-  URGENT: 'Urgente',
+  ...PRIORITY_LABEL_PT,
 };
 
 // Status labels PT-BR
 const STATUS_LABEL: Record<string, string> = {
-  OPEN: 'Aberto',
-  IN_PROGRESS: 'Em Andamento',
-  PENDING: 'Pendente',
-  RESOLVED: 'Resolvido',
-  CLOSED: 'Fechado',
+  ...STATUS_LABEL_PT,
 };
 
 // Source labels PT-BR
 const SOURCE_LABEL: Record<string, string> = {
+  ...SOURCE_LABEL_PT,
   PORTAL: 'Portal do Cliente',
   TEAMS: 'Microsoft Teams',
   EMAIL: 'E-mail (Exchange)',
   PHONE: 'Telefone',
   MANUAL: 'Abertura Manual',
+};
+
+const SLA_OUTCOME_LABEL: Record<string, string> = {
+  met: 'Cumprido',
+  breached: 'Estourado',
+  within: 'No prazo',
 };
 
 // Brand colors
@@ -81,16 +92,31 @@ export async function GET(request: Request) {
       ? `${dateFrom.replace(/-/g, '/')} a ${dateTo.replace(/-/g, '/')}`
       : 'Todos os Registros';
 
+    const kpiInputs: KpiTicketInput[] = tickets.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      category: t.category,
+      source: t.source,
+      createdAt: t.createdAt,
+      resolvedAt: t.resolvedAt,
+      createdById: t.createdById,
+      assignedToId: t.assignedToId,
+      assignee: t.assignee,
+      creator: t.creator,
+      messages: t.messages,
+    }));
+
+    const report = computeKpiReport(kpiInputs);
+    const { summary, breakdowns } = report;
+
     // ── SHEET 1: Relatório Completo ──────────────────────────────────────────
     const reportRows = tickets.map((t, index) => {
       const createdDate = new Date(t.createdAt);
       const resolvedDate = t.resolvedAt ? new Date(t.resolvedAt) : null;
-      let resolutionTimeHours = '';
-
-      if (resolvedDate) {
-        const diffMs = resolvedDate.getTime() - createdDate.getTime();
-        resolutionTimeHours = (diffMs / (1000 * 60 * 60)).toFixed(2);
-      }
+      const durationMs = resolutionDurationMs(kpiInputs[index]);
+      const sla = evaluateSla(kpiInputs[index]);
 
       return {
         'Nº': index + 1,
@@ -99,6 +125,8 @@ export async function GET(request: Request) {
         'Descrição': t.description.substring(0, 200) + (t.description.length > 200 ? '...' : ''),
         'Categoria': t.category,
         'Prioridade': PRIORITY_LABEL[t.priority] || t.priority,
+        'Meta SLA': getSlaTargetLabel(t.priority),
+        'Status SLA': sla ? SLA_OUTCOME_LABEL[sla] : '—',
         'Status': STATUS_LABEL[t.status] || t.status,
         'Origem': SOURCE_LABEL[t.source] || t.source,
         'ID Ref. Externo': t.externalReferenceId || '—',
@@ -110,191 +138,150 @@ export async function GET(request: Request) {
         'Data de Resolução': resolvedDate
           ? resolvedDate.toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })
           : 'Pendente',
-        'Tempo de Resolução (h)': resolutionTimeHours || '—',
-        'Solução / Resolução': (t as any).resolution || '—',
+        'Tempo de Resolução (h)':
+          durationMs != null ? (durationMs / (1000 * 60 * 60)).toFixed(2) : '—',
+        'Solução / Resolução': t.resolution || '—',
         'Qtd. Mensagens': t.messages?.length ?? 0,
       };
     });
 
     // ── SHEET 2: Resumo Executivo ────────────────────────────────────────────
-    const totalTickets = tickets.length;
-    const resolvedTickets = tickets.filter(t => t.status === 'RESOLVED' || t.status === 'CLOSED').length;
-    const openTickets = tickets.filter(t => t.status === 'OPEN').length;
-    const inProgressTickets = tickets.filter(t => t.status === 'IN_PROGRESS').length;
-    const pendingTickets = tickets.filter(t => t.status === 'PENDING').length;
-    const urgentTickets = tickets.filter(t => t.priority === 'URGENT').length;
-    const highTickets = tickets.filter(t => t.priority === 'HIGH').length;
-
-    const resolvedWithTime = tickets.filter(t => t.resolvedAt);
-    const avgResolutionHours =
-      resolvedWithTime.length > 0
-        ? (
-            resolvedWithTime.reduce((sum, t) => {
-              const diff =
-                new Date(t.resolvedAt!).getTime() - new Date(t.createdAt).getTime();
-              return sum + diff / (1000 * 60 * 60);
-            }, 0) / resolvedWithTime.length
-          ).toFixed(2)
-        : '—';
-
-    const resolutionRate =
-      totalTickets > 0
-        ? ((resolvedTickets / totalTickets) * 100).toFixed(1) + '%'
-        : '0.0%';
-
-    // SLA breaches: HIGH or URGENT tickets open for more than 2 hours
-    const slaBreaches = tickets.filter(t => {
-      if (t.status === 'RESOLVED' || t.status === 'CLOSED') return false;
-      if (t.priority !== 'HIGH' && t.priority !== 'URGENT') return false;
-      const ageMs = Date.now() - new Date(t.createdAt).getTime();
-      return ageMs > 1000 * 60 * 120;
-    }).length;
-
-    // Category breakdown
-    const categoryCount: Record<string, number> = {};
-    tickets.forEach(t => {
-      categoryCount[t.category] = (categoryCount[t.category] || 0) + 1;
-    });
-
-    // Source breakdown
-    const sourceCount: Record<string, number> = {};
-    tickets.forEach(t => {
-      const label = SOURCE_LABEL[t.source] || t.source;
-      sourceCount[label] = (sourceCount[label] || 0) + 1;
-    });
-
-    // Priority breakdown
-    const priorityCount: Record<string, number> = {};
-    tickets.forEach(t => {
-      const label = PRIORITY_LABEL[t.priority] || t.priority;
-      priorityCount[label] = (priorityCount[label] || 0) + 1;
-    });
-
     const summaryRows = [
       { 'Indicador': '📋 PERÍODO ANALISADO', 'Valor': periodLabel },
       { 'Indicador': '', 'Valor': '' },
-      { 'Indicador': '📊 TOTAL DE CHAMADOS', 'Valor': totalTickets },
-      { 'Indicador': '✅ Resolvidos / Fechados', 'Valor': resolvedTickets },
-      { 'Indicador': '🔄 Em Andamento', 'Valor': inProgressTickets },
-      { 'Indicador': '⏳ Pendentes', 'Valor': pendingTickets },
-      { 'Indicador': '🔴 Em Aberto', 'Valor': openTickets },
-      { 'Indicador': '🚨 Urgentes', 'Valor': urgentTickets },
-      { 'Indicador': '⚠️ Alta Prioridade', 'Valor': highTickets },
-      { 'Indicador': '📈 Taxa de Resolução', 'Valor': resolutionRate },
-      { 'Indicador': '⏱️ Tempo Médio de Resolução (h)', 'Valor': avgResolutionHours },
-      { 'Indicador': '🚫 Estouros de SLA (Alta/Urgente >2h)', 'Valor': slaBreaches },
+      { 'Indicador': '📊 TOTAL DE CHAMADOS', 'Valor': summary.total },
+      { 'Indicador': '✅ Resolvidos / Fechados', 'Valor': summary.resolved },
+      { 'Indicador': '🔄 Em Andamento', 'Valor': summary.inProgress },
+      { 'Indicador': '⏳ Pendentes', 'Valor': summary.pending },
+      { 'Indicador': '🔴 Em Aberto', 'Valor': summary.open },
+      { 'Indicador': '📦 Backlog (aberto+andamento+pendente)', 'Valor': summary.backlog },
+      { 'Indicador': '🚨 Urgentes abertos', 'Valor': summary.urgentOpen },
+      { 'Indicador': '⚠️ Alta prioridade abertos', 'Valor': summary.highOpen },
+      { 'Indicador': '📈 Taxa de Resolução', 'Valor': `${summary.resolutionRate.toFixed(1)}%` },
+      {
+        'Indicador': '⏱️ MTTR (tempo médio de resolução)',
+        'Valor': formatDurationHours(summary.mttrHours),
+      },
+      {
+        'Indicador': '💬 MTTFR (tempo médio 1ª resposta)',
+        'Valor': formatDurationHours(summary.mttfrHours),
+      },
+      {
+        'Indicador': '✅ Compliance SLA',
+        'Valor':
+          summary.slaCompliancePct != null
+            ? `${summary.slaCompliancePct.toFixed(1)}%`
+            : '—',
+      },
+      { 'Indicador': '🟢 SLA cumpridos', 'Valor': summary.slaMet },
+      { 'Indicador': '🚫 SLA estourados (total)', 'Valor': summary.slaBreached },
+      { 'Indicador': '⏳ SLA ainda no prazo', 'Valor': summary.slaWithin },
+      { 'Indicador': '🔴 Estouros abertos agora', 'Valor': summary.openSlaBreaches },
       { 'Indicador': '', 'Valor': '' },
       { 'Indicador': '── POR CATEGORIA ──', 'Valor': '' },
-      ...Object.entries(categoryCount).map(([cat, count]) => ({
-        'Indicador': `  ${cat}`,
-        'Valor': count,
+      ...breakdowns.byCategory.map((row) => ({
+        'Indicador': `  ${row.label}`,
+        'Valor': row.count,
       })),
       { 'Indicador': '', 'Valor': '' },
       { 'Indicador': '── POR CANAL DE ORIGEM ──', 'Valor': '' },
-      ...Object.entries(sourceCount).map(([src, count]) => ({
-        'Indicador': `  ${src}`,
-        'Valor': count,
+      ...breakdowns.bySource.map((row) => ({
+        'Indicador': `  ${SOURCE_LABEL[row.key] || row.label}`,
+        'Valor': row.count,
       })),
       { 'Indicador': '', 'Valor': '' },
       { 'Indicador': '── POR PRIORIDADE ──', 'Valor': '' },
-      ...Object.entries(priorityCount).map(([pri, count]) => ({
-        'Indicador': `  ${pri}`,
-        'Valor': count,
+      ...breakdowns.byPriority.map((row) => ({
+        'Indicador': `  ${row.label}`,
+        'Valor': row.count,
       })),
     ];
 
     // ── SHEET 3: KPIs do Período ────────────────────────────────────────────
-    // Daily volume: count tickets per day in the period
-    const dailyVolume: Record<string, number> = {};
-    tickets.forEach(t => {
-      const day = new Date(t.createdAt)
-        .toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });
-      dailyVolume[day] = (dailyVolume[day] || 0) + 1;
-    });
-
-    // Agent performance: tickets assigned and resolved per agent
-    const agentStats: Record<string, { assigned: number; resolved: number; totalHours: number }> = {};
-    tickets.forEach(t => {
-      const agentName = t.assignee?.name || 'Não Atribuído';
-      if (!agentStats[agentName]) agentStats[agentName] = { assigned: 0, resolved: 0, totalHours: 0 };
-      agentStats[agentName].assigned++;
-      if ((t.status === 'RESOLVED' || t.status === 'CLOSED') && t.resolvedAt) {
-        agentStats[agentName].resolved++;
-        const hrs = (new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime()) / (1000 * 60 * 60);
-        agentStats[agentName].totalHours += hrs;
-      }
-    });
-
     const kpiRows = [
-      // ── Header section ──
       { 'KPI': '▶ INDICADORES CHAVE DE DESEMPENHO (KPI)', 'Valor': '', 'Contexto': `Período: ${periodLabel}` },
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Volume ──
-      { 'KPI': '📊 Volume Total de Chamados', 'Valor': totalTickets, 'Contexto': 'Total no período' },
-      { 'KPI': '🟢 Resolvidos / Fechados', 'Valor': resolvedTickets, 'Contexto': '' },
-      { 'KPI': '🔵 Em Andamento', 'Valor': inProgressTickets, 'Contexto': '' },
-      { 'KPI': '🟡 Pendentes', 'Valor': pendingTickets, 'Contexto': '' },
-      { 'KPI': '🔴 Em Aberto', 'Valor': openTickets, 'Contexto': '' },
+      { 'KPI': '📊 Volume Total de Chamados', 'Valor': summary.total, 'Contexto': 'Total no período' },
+      { 'KPI': '🟢 Resolvidos / Fechados', 'Valor': summary.resolved, 'Contexto': '' },
+      { 'KPI': '🔵 Em Andamento', 'Valor': summary.inProgress, 'Contexto': '' },
+      { 'KPI': '🟡 Pendentes', 'Valor': summary.pending, 'Contexto': '' },
+      { 'KPI': '🔴 Em Aberto', 'Valor': summary.open, 'Contexto': '' },
+      { 'KPI': '📦 Backlog', 'Valor': summary.backlog, 'Contexto': 'Aberto + Andamento + Pendente' },
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Quality ──
-      { 'KPI': '📈 Taxa de Resolução', 'Valor': resolutionRate, 'Contexto': 'Resolvidos ÷ Total' },
-      { 'KPI': '⏱️ MTTR (Tempo Médio de Resolução)', 'Valor': avgResolutionHours !== '—' ? `${avgResolutionHours}h` : '—', 'Contexto': 'Mean Time To Resolve' },
-      { 'KPI': '🚫 Estouros de SLA', 'Valor': slaBreaches, 'Contexto': 'Alta/Urgente abertos >2h' },
+      {
+        'KPI': '📈 Taxa de Resolução',
+        'Valor': `${summary.resolutionRate.toFixed(1)}%`,
+        'Contexto': 'Resolvidos ÷ Total',
+      },
+      {
+        'KPI': '⏱️ MTTR (Mean Time To Resolve)',
+        'Valor': formatDurationHours(summary.mttrHours),
+        'Contexto': `Amostra: ${summary.mttrSampleSize} · ${report.definitions.mttr}`,
+      },
+      {
+        'KPI': '💬 MTTFR (1ª resposta)',
+        'Valor': formatDurationHours(summary.mttfrHours),
+        'Contexto': `Amostra: ${summary.mttfrSampleSize}`,
+      },
+      {
+        'KPI': '✅ Compliance SLA',
+        'Valor':
+          summary.slaCompliancePct != null
+            ? `${summary.slaCompliancePct.toFixed(1)}%`
+            : '—',
+        'Contexto': report.definitions.sla,
+      },
+      { 'KPI': '🟢 SLA cumpridos', 'Valor': summary.slaMet, 'Contexto': '' },
+      { 'KPI': '🚫 SLA estourados', 'Valor': summary.slaBreached, 'Contexto': 'Abertos ou resolvidos após a meta' },
+      { 'KPI': '⏳ SLA no prazo (ainda abertos)', 'Valor': summary.slaWithin, 'Contexto': 'Excluídos do denominador da compliance' },
+      { 'KPI': '🔴 Estouros abertos agora', 'Valor': summary.openSlaBreaches, 'Contexto': 'Backlog fora da meta' },
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Priority breakdown ──
       { 'KPI': '▶ DISTRIBUIÇÃO POR PRIORIDADE', 'Valor': '', 'Contexto': '' },
-      ...Object.entries(priorityCount).map(([pri, count]) => ({
-        'KPI': `  ${pri}`,
-        'Valor': count,
-        'Contexto': totalTickets > 0 ? `${((count / totalTickets) * 100).toFixed(1)}%` : '0.0%',
+      ...breakdowns.byPriority.map((row) => ({
+        'KPI': `  ${row.label}`,
+        'Valor': row.count,
+        'Contexto':
+          summary.total > 0
+            ? `${((row.count / summary.total) * 100).toFixed(1)}% · meta ${getSlaTargetLabel(row.key)}`
+            : '0.0%',
       })),
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Category breakdown ──
       { 'KPI': '▶ DISTRIBUIÇÃO POR CATEGORIA', 'Valor': '', 'Contexto': '' },
-      ...Object.entries(categoryCount).map(([cat, count]) => ({
-        'KPI': `  ${cat}`,
-        'Valor': count,
-        'Contexto': totalTickets > 0 ? `${((count / totalTickets) * 100).toFixed(1)}%` : '0.0%',
+      ...breakdowns.byCategory.map((row) => ({
+        'KPI': `  ${row.label}`,
+        'Valor': row.count,
+        'Contexto':
+          summary.total > 0 ? `${((row.count / summary.total) * 100).toFixed(1)}%` : '0.0%',
       })),
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Source breakdown ──
       { 'KPI': '▶ DISTRIBUIÇÃO POR CANAL DE ORIGEM', 'Valor': '', 'Contexto': '' },
-      ...Object.entries(sourceCount).map(([src, count]) => ({
-        'KPI': `  ${src}`,
-        'Valor': count,
-        'Contexto': totalTickets > 0 ? `${((count / totalTickets) * 100).toFixed(1)}%` : '0.0%',
+      ...breakdowns.bySource.map((row) => ({
+        'KPI': `  ${SOURCE_LABEL[row.key] || row.label}`,
+        'Valor': row.count,
+        'Contexto':
+          summary.total > 0 ? `${((row.count / summary.total) * 100).toFixed(1)}%` : '0.0%',
       })),
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Daily volume ──
-      { 'KPI': '▶ VOLUME DIÁRIO DE CHAMADOS', 'Valor': '', 'Contexto': '' },
-      ...Object.entries(dailyVolume)
-        .sort((a, b) => {
-          // Sort by date (DD/MM/YYYY → parse to Date for comparison)
-          const [da, ma, ya] = a[0].split('/').map(Number);
-          const [db, mb, yb] = b[0].split('/').map(Number);
-          return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
-        })
-        .map(([day, count]) => ({
-          'KPI': `  ${day}`,
-          'Valor': count,
-          'Contexto': '',
-        })),
+      { 'KPI': '▶ VOLUME DIÁRIO', 'Valor': '', 'Contexto': 'Criados / Resolvidos' },
+      ...breakdowns.dailyVolume.map((row) => ({
+        'KPI': `  ${row.day}`,
+        'Valor': `${row.created} criados`,
+        'Contexto': `${row.resolved} resolvidos`,
+      })),
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
-
-      // ── Agent performance ──
       { 'KPI': '▶ DESEMPENHO POR TÉCNICO', 'Valor': '', 'Contexto': '' },
-      ...Object.entries(agentStats).map(([agent, stats]) => ({
-        'KPI': `  ${agent}`,
-        'Valor': `${stats.assigned} atribuídos / ${stats.resolved} resolvidos`,
-        'Contexto': stats.resolved > 0
-          ? `MTTR: ${(stats.totalHours / stats.resolved).toFixed(1)}h`
-          : '—',
+      ...breakdowns.byTechnician.map((row) => ({
+        'KPI': `  ${row.name}`,
+        'Valor': `${row.assigned} atribuídos / ${row.resolved} resolvidos`,
+        'Contexto': [
+          row.mttrHours != null ? `MTTR ${formatDurationHours(row.mttrHours)}` : null,
+          row.slaCompliancePct != null
+            ? `SLA ${row.slaCompliancePct.toFixed(0)}%`
+            : null,
+          `${row.slaBreached} estouro(s)`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
       })),
     ];
 
