@@ -13,6 +13,7 @@ import {
   canAccessOperatorArea,
   canManageSettings,
   canSyncMicrosoft,
+  canTriggerPendencyScan,
   roleDisplayLabel,
 } from '@/lib/permissions';
 import { RoleBadge } from '@/components/permission-gates';
@@ -89,6 +90,16 @@ interface Ticket {
   creator: { name: string; email: string };
   assignee?: { id: string; name: string; email: string };
   messages: Message[];
+  externalTraces?: ExternalTrace[];
+}
+
+interface ChatEntry {
+  key: string;
+  senderName: string;
+  content: string;
+  createdAt: string;
+  isOperator: boolean;
+  isOwn: boolean;
 }
 
 function getInitials(name: string): string {
@@ -108,6 +119,41 @@ function formatDate(dateStr: string): string {
     hour: '2-digit', minute: '2-digit',
     timeZone: 'America/Fortaleza',
   });
+}
+
+const OPERATOR_ROLES = ['ADMIN', 'AGENT', 'TECHNICIAN'];
+
+/**
+ * Parse "[dd/mm/aaaa, hh:mm:ss] Nome: mensagem" lines from a grouped
+ * ExternalTrace.rawContent so the customer's chat/email messages show up
+ * as chat bubbles attributed to their name.
+ */
+function parseTraceThread(rawContent: string): ChatEntry[] {
+  if (!rawContent) return [];
+  const entries: ChatEntry[] = [];
+  rawContent.split('\n').forEach((line, idx) => {
+    const m = line.match(/^\[(\d{2}\/\d{2}\/\d{4}),\s*(\d{2}:\d{2}:\d{2})\]\s*(.+?):\s*(.*)$/);
+    if (!m) return;
+    const [, datePart, timePart, name, content] = m;
+    const [d, mo, y] = datePart.split('/');
+    const dt = new Date(`${y}-${mo}-${d}T${timePart}`);
+    if (Number.isNaN(dt.getTime())) return;
+    entries.push({
+      key: `trace-${idx}`,
+      senderName: name.trim() || 'Funcionário',
+      content: content.trim(),
+      createdAt: dt.toISOString(),
+      isOperator: false,
+      isOwn: false,
+    });
+  });
+  return entries;
+}
+
+/** Integration tickets carry "summary\n\n---\nrawContext"; show only the summary in the card. */
+function splitDescriptionSummary(description: string): string {
+  const sep = description.indexOf('\n\n---\n');
+  return sep === -1 ? description : description.slice(0, sep);
 }
 
 export default function AdminDashboard() {
@@ -868,7 +914,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {canSyncMicrosoft(user) && (
+          {canTriggerPendencyScan(user) && (
           <button
             onClick={handleSyncMicrosoft}
             disabled={syncing}
@@ -1096,8 +1142,15 @@ export default function AdminDashboard() {
                       <div className="flex-1 overflow-y-auto p-6 space-y-4">
                         {/* Initial Description Card */}
                         <div className="glass-card rounded-xl p-4 border border-white/5 text-left mb-6 bg-slate-900/10">
-                          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Relato Inicial</p>
-                          <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{selectedTicket.description}</p>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Relato Inicial</p>
+                            {selectedTicket.creator?.name && (
+                              <span className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 truncate">
+                                {selectedTicket.creator.name}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{splitDescriptionSummary(selectedTicket.description)}</p>
                           
                           {selectedTicket.externalReferenceId && (
                             <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-1.5 text-[10px] text-indigo-400">
@@ -1107,36 +1160,42 @@ export default function AdminDashboard() {
                           )}
                         </div>
 
-                        {selectedTicket.messages && selectedTicket.messages.map((msg) => {
-                          const isOwnMessage = msg.senderId === user?.id;
-                          const isAgent =
-                            msg.sender.role === 'ADMIN' ||
-                            msg.sender.role === 'AGENT' ||
-                            msg.sender.role === 'TECHNICIAN';
-                          
-                          return (
-                            <div key={msg.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                        {(() => {
+                          const thread: ChatEntry[] = [
+                            ...(selectedTicket.externalTraces || []).flatMap((trace) => parseTraceThread(trace.rawContent)),
+                            ...(selectedTicket.messages || []).map((msg) => ({
+                              key: msg.id,
+                              senderName: msg.sender.name,
+                              content: msg.content,
+                              createdAt: msg.createdAt,
+                              isOperator: OPERATOR_ROLES.includes(msg.sender.role),
+                              isOwn: msg.senderId === user?.id,
+                            })),
+                          ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+                          return thread.map((entry) => (
+                            <div key={entry.key} className={`flex ${entry.isOwn ? 'justify-end' : 'justify-start'}`}>
                               <div className={`max-w-[75%] rounded-2xl p-4 text-left shadow-lg ${
-                                isOwnMessage 
+                                entry.isOwn 
                                   ? 'bg-indigo-600 text-white rounded-br-none' 
-                                  : isAgent
+                                  : entry.isOperator
                                     ? 'bg-slate-900 border border-indigo-500/20 text-slate-100 rounded-bl-none'
                                     : 'bg-slate-900 border border-white/5 text-slate-100 rounded-bl-none'
                               }`}>
                                 <div className="flex items-center gap-2 mb-2 opacity-80">
-                                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${isAgent ? 'bg-indigo-500/20 text-indigo-200' : 'bg-white/10 text-slate-200'}`}>
-                                    {getInitials(msg.sender.name)}
+                                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${entry.isOperator ? 'bg-indigo-500/20 text-indigo-200' : 'bg-white/10 text-slate-200'}`}>
+                                    {getInitials(entry.senderName)}
                                   </div>
                                   <div className="flex-1 flex items-center justify-between gap-4 text-[10px] font-semibold">
-                                    <span title={msg.sender.name}>{msg.sender.name} {isAgent && '(TI)'}</span>
-                                    <span>{new Date(msg.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                    <span title={entry.senderName}>{entry.senderName} {entry.isOperator && '(TI)'}</span>
+                                    <span>{new Date(entry.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
                                 </div>
-                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{entry.content}</p>
                               </div>
                             </div>
-                          );
-                        })}
+                          ));
+                        })()}
                         <div ref={messagesEndRef} />
                       </div>
 
@@ -1282,7 +1341,7 @@ export default function AdminDashboard() {
                     Comunicações identificadas pela IA como chamados técnicos não abertos formalmente.
                   </p>
                 </div>
-                {canSyncMicrosoft(user) && (
+                {canTriggerPendencyScan(user) && (
                 <button
                   onClick={handleSyncMicrosoft}
                   disabled={syncing}

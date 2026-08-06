@@ -11,12 +11,12 @@ import {
 } from '@/lib/trace-grouping';
 import type { MicrosoftMessage } from '@/lib/microsoft';
 import { getSession } from '@/lib/auth';
-import { canSyncMicrosoft } from '@/lib/permissions';
+import { canTriggerPendencyScan, canSyncMicrosoft } from '@/lib/permissions';
 
 export async function GET() {
   try {
     const session = await getSession();
-    if (!canSyncMicrosoft(session)) {
+    if (!canTriggerPendencyScan(session)) {
       return NextResponse.json({ success: false, error: 'Acesso negado' }, { status: 403 });
     }
 

@@ -77,6 +77,15 @@ export function canSyncMicrosoft(user: Pick<SessionUser, 'role'> | null | undefi
   return !!user && isAdminRole(user.role);
 }
 
+/**
+ * On-demand pendency scan ("buscar pendências") — Teams/Exchange pull.
+ * Any operator may trigger the scan; each user only sees traces routed to them.
+ * Writing/simulating (POST /api/integrations/*) stays ADMIN-only (canSyncMicrosoft).
+ */
+export function canTriggerPendencyScan(user: Pick<SessionUser, 'role'> | null | undefined): boolean {
+  return canAccessOperatorArea(user);
+}
+
 /** List assignees for ticket assignment UI (operators may read). */
 export function canListOperators(user: Pick<SessionUser, 'role'> | null | undefined): boolean {
   return canAccessOperatorArea(user);
@@ -217,5 +226,6 @@ export const PERMISSION_MATRIX = {
   systemSettings: { ADMIN: true, TECHNICIAN: false },
   crudTechnicians: { ADMIN: true, TECHNICIAN: false },
   microsoftSync: { ADMIN: true, TECHNICIAN: false },
+  pendencyScan: { ADMIN: true, TECHNICIAN: true },
 } as const;
 
