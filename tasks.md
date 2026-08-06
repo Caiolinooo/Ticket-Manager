@@ -342,7 +342,7 @@ Melhorar a aba Relatórios & KPIs com métricas corretas de SLA/MTTR, filtros de
 ### Objetivo
 - [x] Role `TECHNICIAN` (SupportUser) — login pela aba **Operador**
 - [x] JWT/cookie claims com `role: TECHNICIAN | ADMIN` (AGENT = alias legado)
-- [x] Matriz: TECHNICIAN vê/atualiza tickets e pendências; **não** settings, CRUD técnicos, sync Graph
+- [x] Matriz: TECHNICIAN vê/atualiza tickets/pendências e dispara scan (`buscar pendências`); **não** settings, CRUD técnicos, simulação Graph
 - [x] Hooks `canAccessTicket` / routing por mailbox (`receiveMode`)
 - [x] Guards em `/admin`, tickets, approve/ignore, settings, sync
 - [x] Smoke `scripts/smoke-technician-auth.mjs`
@@ -355,10 +355,11 @@ Melhorar a aba Relatórios & KPIs com métricas corretas de SLA/MTTR, filtros de
 | Login operador (`area=admin`) | sim | sim |
 | Fila de tickets / update / mensagens | sim | sim* |
 | Pendências approve/ignore | sim | sim* |
+| Buscar pendências (scan Teams/Exchange on-demand) | sim | sim |
 | KPIs / export | sim | sim (setor unificado) |
 | Configurações de sistema | sim | não |
 | CRUD de técnicos | sim | não |
-| Sync Microsoft (Teams/Exchange) | sim | não |
+| Simulador/injeção manual Microsoft | sim | não |
 
 \* filtrado por `receiveMode` + `accountUpn`: `OWN_ONLY` = contas do técnico; `SHARED_WITH_ADMIN` = contas dele ∪ admin
 

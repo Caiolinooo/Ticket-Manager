@@ -371,7 +371,7 @@ export default function ClientPortal() {
                 {/* Message list */}
                 {selectedTicket.messages && selectedTicket.messages.map((msg) => {
                   const isOwnMessage = msg.senderId === user?.id;
-                  const isAgent = msg.sender.role === 'ADMIN' || msg.sender.role === 'AGENT';
+                  const isAgent = msg.sender.role === 'ADMIN' || msg.sender.role === 'AGENT' || msg.sender.role === 'TECHNICIAN';
                   
                   return (
                     <div key={msg.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
