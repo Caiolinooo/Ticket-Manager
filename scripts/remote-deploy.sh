@@ -17,6 +17,7 @@ echo "=== build ==="
 npm run build
 echo "=== pm2 restart ==="
 pm2 restart ticket-manager
+pm2 save
 sleep 2
 pm2 list
 echo "=== smoke ==="
