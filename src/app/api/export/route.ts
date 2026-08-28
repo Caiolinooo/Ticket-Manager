@@ -13,6 +13,7 @@ import {
   STATUS_LABEL_PT,
   resolutionDurationMs,
   type KpiTicketInput,
+  type MonthlyCategoryMatrix,
 } from '@/lib/kpi-metrics';
 
 // Priority labels PT-BR
@@ -108,7 +109,7 @@ export async function GET(request: Request) {
       messages: t.messages,
     }));
 
-    const report = computeKpiReport(kpiInputs);
+    const report = computeKpiReport(kpiInputs, Date.now(), { from: dateFrom, to: dateTo });
     const { summary, breakdowns } = report;
 
     // ── SHEET 1: Relatório Completo ──────────────────────────────────────────
@@ -178,6 +179,9 @@ export async function GET(request: Request) {
       { 'Indicador': '⏳ SLA ainda no prazo', 'Valor': summary.slaWithin },
       { 'Indicador': '🔴 Estouros abertos agora', 'Valor': summary.openSlaBreaches },
       { 'Indicador': '', 'Valor': '' },
+      { 'Indicador': '── POR MÊS × CATEGORIA (SGI) ──', 'Valor': '' },
+      ...sgiSummaryRows(breakdowns.monthlyByCategory),
+      { 'Indicador': '', 'Valor': '' },
       { 'Indicador': '── POR CATEGORIA ──', 'Valor': '' },
       ...breakdowns.byCategory.map((row) => ({
         'Indicador': `  ${row.label}`,
@@ -246,6 +250,15 @@ export async function GET(request: Request) {
             : '0.0%',
       })),
       { 'KPI': '', 'Valor': '', 'Contexto': '' },
+      { 'KPI': '▶ ATENDIMENTOS POR MÊS E CATEGORIA', 'Valor': '', 'Contexto': 'Indicadores – SGI' },
+      ...breakdowns.monthlyByCategory.months.map((row) => ({
+        'KPI': `  ${row.label}`,
+        'Valor': row.total,
+        'Contexto': breakdowns.monthlyByCategory.categories
+          .map((cat) => `${cat}: ${row.counts[cat] ?? 0}`)
+          .join(' · '),
+      })),
+      { 'KPI': '', 'Valor': '', 'Contexto': '' },
       { 'KPI': '▶ DISTRIBUIÇÃO POR CATEGORIA', 'Valor': '', 'Contexto': '' },
       ...breakdowns.byCategory.map((row) => ({
         'KPI': `  ${row.label}`,
@@ -299,6 +312,9 @@ export async function GET(request: Request) {
       XLSX.utils.book_append_sheet(wb, wsEmpty, 'Chamados');
     }
 
+    const wsSgi = buildSgiWorksheet(breakdowns.monthlyByCategory);
+    XLSX.utils.book_append_sheet(wb, wsSgi, 'Indicadores SGI');
+
     // Sheet 2: Executive Summary
     const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
     autoFitColumns(wsSummary, summaryRows);
@@ -334,6 +350,76 @@ export async function GET(request: Request) {
     console.error('Export Excel error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
+}
+
+function sgiSummaryRows(matrix: MonthlyCategoryMatrix): { Indicador: string; Valor: string | number }[] {
+  if (matrix.months.length === 0) {
+    return [{ Indicador: '  Sem atendimentos no período', Valor: 0 }];
+  }
+  return matrix.months.map((row) => ({
+    Indicador: `  ${row.label}`,
+    Valor: matrix.categories.map((cat) => `${cat}: ${row.counts[cat] ?? 0}`).join(' | ') + ` | Total: ${row.total}`,
+  }));
+}
+
+function buildSgiWorksheet(matrix: MonthlyCategoryMatrix): XLSX.WorkSheet {
+  const header = ['Ref.', ...matrix.categories, 'Total'];
+  const aoa: (string | number)[][] = [
+    [matrix.title],
+    header,
+    ...matrix.months.map((m) => [
+      m.label,
+      ...matrix.categories.map((c) => m.counts[c] ?? 0),
+      m.total,
+    ]),
+  ];
+  if (matrix.months.length === 0) {
+    aoa.push(['—', ...matrix.categories.map(() => 0), 0]);
+  }
+  aoa.push([]);
+  aoa.push(['AN-QUA-007-RO | MN-QUA-R17']);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const lastCol = header.length - 1;
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }];
+  ws['!cols'] = header.map((h, i) => ({ wch: i === 0 ? 14 : Math.min(Math.max(h.length + 2, 10), 36) }));
+
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  const dataEndRow = 1 + Math.max(matrix.months.length, 1);
+
+  for (let col = 0; col <= lastCol; col++) {
+    const titleCell = XLSX.utils.encode_cell({ r: 0, c: col });
+    if (!ws[titleCell]) ws[titleCell] = { t: 's', v: col === 0 ? matrix.title : '' };
+    ws[titleCell].s = {
+      font: { bold: true, color: { rgb: COLOR_WHITE }, sz: 14 },
+      fill: { fgColor: { rgb: BRAND_NAVY } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+    };
+    const headerCell = XLSX.utils.encode_cell({ r: 1, c: col });
+    if (ws[headerCell]) {
+      ws[headerCell].s = {
+        font: { bold: true, color: { rgb: COLOR_WHITE }, sz: 10 },
+        fill: { fgColor: { rgb: BRAND_NAVY } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      };
+    }
+  }
+
+  for (let row = 2; row <= dataEndRow; row++) {
+    for (let col = 0; col <= lastCol; col++) {
+      const addr = XLSX.utils.encode_cell({ r: row, c: col });
+      if (!ws[addr]) continue;
+      const isRef = col === 0;
+      ws[addr].s = {
+        font: { bold: true, color: { rgb: isRef ? COLOR_WHITE : '111827' }, sz: 11 },
+        fill: { fgColor: { rgb: isRef ? BRAND_NAVY : 'E5E7EB' } },
+        alignment: { horizontal: 'center', vertical: 'center' },
+      };
+    }
+  }
+
+  void range;
+  return ws;
 }
 
 /** Auto-fit column widths based on content length */

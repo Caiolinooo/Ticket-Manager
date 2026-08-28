@@ -6,6 +6,7 @@ import {
   LogOut, Plus, MessageSquare, AlertCircle, 
   HelpCircle, CheckCircle, Clock, Send, ShieldAlert, User, Sparkles
 } from 'lucide-react';
+import { categorySelectOptions } from '@/lib/ticket-categories';
 
 interface UserInfo {
   id: string;
@@ -468,11 +469,11 @@ export default function ClientPortal() {
                     onChange={(e) => setNewCategory(e.target.value)}
                     className="block w-full px-4 py-2.5 bg-slate-950 border border-white/5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
                   >
-                    <option value="Geral">Geral</option>
-                    <option value="Hardware">Hardware</option>
-                    <option value="Software">Software</option>
-                    <option value="Acessos">Acessos</option>
-                    <option value="Redes">Redes</option>
+                    {categorySelectOptions(newCategory).map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

@@ -6,6 +6,12 @@
  * Durations are wall-clock (not business hours).
  */
 
+import {
+  normalizeReportCategory,
+  SGI_CATEGORY_COLUMNS,
+  SGI_REPORT_TITLE,
+} from '@/lib/ticket-categories';
+
 export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | string;
 export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'PENDING' | 'RESOLVED' | 'CLOSED' | string;
 export type SlaOutcome = 'met' | 'breached' | 'within';
@@ -173,6 +179,24 @@ export interface DailyVolumeRow {
   resolved: number;
 }
 
+export interface MonthlyCategoryMonthRow {
+  key: string;
+  label: string;
+  counts: Record<string, number>;
+  total: number;
+}
+
+export interface MonthlyCategoryMatrix {
+  title: string;
+  categories: string[];
+  months: MonthlyCategoryMonthRow[];
+}
+
+export interface KpiPeriodRange {
+  from?: string | null;
+  to?: string | null;
+}
+
 export interface KpiSummary {
   total: number;
   resolved: number;
@@ -204,6 +228,7 @@ export interface KpiBreakdowns {
   bySla: CountRow[];
   byTechnician: TechnicianBreakdownRow[];
   dailyVolume: DailyVolumeRow[];
+  monthlyByCategory: MonthlyCategoryMatrix;
 }
 
 export interface KpiTrendDelta {
@@ -224,7 +249,9 @@ export interface KpiReport {
   };
 }
 
-const CATEGORY_ORDER = ['Hardware', 'Software', 'Acessos', 'Redes', 'Geral'];
+const CATEGORY_ORDER = [...SGI_CATEGORY_COLUMNS, 'Acessos', 'Redes', 'Geral'];
+const MONTH_ABBR_PT = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'] as const;
+const DISPLAY_TZ = 'America/Fortaleza';
 const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'PENDING', 'RESOLVED', 'CLOSED'];
 const SOURCE_ORDER = ['PORTAL', 'TEAMS', 'EMAIL'];
 const PRIORITY_ORDER = ['URGENT', 'HIGH', 'MEDIUM', 'LOW'];
@@ -344,6 +371,136 @@ function buildTechnicianBreakdown(
       };
     })
     .sort((a, b) => b.assigned - a.assigned || a.name.localeCompare(b.name, 'pt-BR'));
+}
+
+export function fortalezaYearMonth(value: Date | string): { year: number; month: number } | null {
+  const d = toDate(value);
+  if (!d) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: DISPLAY_TZ,
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(d);
+  const year = Number(parts.find((p) => p.type === 'year')?.value);
+  const month = Number(parts.find((p) => p.type === 'month')?.value);
+  if (!year || !month) return null;
+  return { year, month };
+}
+
+export function monthRefLabel(year: number, month: number): string {
+  const abbr = MONTH_ABBR_PT[month - 1] || String(month).padStart(2, '0');
+  return `${abbr}-${year}`;
+}
+
+export function monthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function addCalendarMonth(year: number, month: number): { year: number; month: number } {
+  if (month === 12) return { year: year + 1, month: 1 };
+  return { year, month: month + 1 };
+}
+
+function compareYearMonth(
+  a: { year: number; month: number },
+  b: { year: number; month: number }
+): number {
+  return a.year !== b.year ? a.year - b.year : a.month - b.month;
+}
+
+function iterateYearMonths(
+  from: { year: number; month: number },
+  to: { year: number; month: number }
+): { year: number; month: number; key: string; label: string }[] {
+  const out: { year: number; month: number; key: string; label: string }[] = [];
+  let cur = from;
+  for (let i = 0; i < 120; i++) {
+    out.push({
+      year: cur.year,
+      month: cur.month,
+      key: monthKey(cur.year, cur.month),
+      label: monthRefLabel(cur.year, cur.month),
+    });
+    if (cur.year === to.year && cur.month === to.month) break;
+    cur = addCalendarMonth(cur.year, cur.month);
+  }
+  return out;
+}
+
+function parseIsoDateNoonFortaleza(isoDate: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return toDate(isoDate);
+  return toDate(`${m[1]}-${m[2]}-${m[3]}T12:00:00-03:00`);
+}
+
+/**
+ * Quantidade de atendimentos por mês (Ref. JUL-2026) × categoria SGI.
+ * Preenche todos os meses do intervalo quando `period.from` e `period.to` existem.
+ */
+export function buildMonthlyCategoryMatrix(
+  tickets: KpiTicketInput[],
+  period?: KpiPeriodRange
+): MonthlyCategoryMatrix {
+  const counts = new Map<string, Map<string, number>>();
+  const extras = new Set<string>();
+  let minYm: { year: number; month: number } | null = null;
+  let maxYm: { year: number; month: number } | null = null;
+
+  const trackYm = (ym: { year: number; month: number }) => {
+    if (!minYm || compareYearMonth(ym, minYm) < 0) minYm = ym;
+    if (!maxYm || compareYearMonth(ym, maxYm) > 0) maxYm = ym;
+  };
+
+  const fromBound = period?.from ? fortalezaYearMonth(parseIsoDateNoonFortaleza(period.from) || period.from) : null;
+  const toBound = period?.to ? fortalezaYearMonth(parseIsoDateNoonFortaleza(period.to) || period.to) : null;
+
+  for (const t of tickets) {
+    const ym = fortalezaYearMonth(t.createdAt);
+    if (!ym) continue;
+    if (!fromBound && !toBound) trackYm(ym);
+    const cat = normalizeReportCategory(t.category);
+    if (!(SGI_CATEGORY_COLUMNS as readonly string[]).includes(cat)) extras.add(cat);
+    const mk = monthKey(ym.year, ym.month);
+    let row = counts.get(mk);
+    if (!row) {
+      row = new Map();
+      counts.set(mk, row);
+    }
+    row.set(cat, (row.get(cat) || 0) + 1);
+  }
+
+  if (fromBound && toBound) {
+    minYm = fromBound;
+    maxYm = toBound;
+  } else if (fromBound && !maxYm) {
+    minYm = fromBound;
+    maxYm = fromBound;
+  } else if (toBound && !minYm) {
+    minYm = toBound;
+    maxYm = toBound;
+  }
+
+  const categories = [
+    ...SGI_CATEGORY_COLUMNS,
+    ...[...extras].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+  ];
+
+  const months: MonthlyCategoryMonthRow[] = [];
+  if (minYm && maxYm && compareYearMonth(minYm, maxYm) <= 0) {
+    for (const m of iterateYearMonths(minYm, maxYm)) {
+      const row = counts.get(m.key);
+      const countsObj: Record<string, number> = {};
+      let total = 0;
+      for (const cat of categories) {
+        const n = row?.get(cat) || 0;
+        countsObj[cat] = n;
+        total += n;
+      }
+      months.push({ key: m.key, label: m.label, counts: countsObj, total });
+    }
+  }
+
+  return { title: SGI_REPORT_TITLE, categories, months };
 }
 
 function buildDailyVolume(tickets: KpiTicketInput[]): DailyVolumeRow[] {
@@ -480,11 +637,17 @@ export function computeKpiSummary(tickets: KpiTicketInput[], nowMs = Date.now())
 
 export function computeKpiBreakdowns(
   tickets: KpiTicketInput[],
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  period?: KpiPeriodRange
 ): KpiBreakdowns {
   const summary = computeKpiSummary(tickets, nowMs);
   return {
-    byCategory: countBy(tickets, (t) => t.category, CATEGORY_ORDER, Object.fromEntries(CATEGORY_ORDER.map((c) => [c, c]))),
+    byCategory: countBy(
+      tickets,
+      (t) => normalizeReportCategory(t.category),
+      CATEGORY_ORDER,
+      Object.fromEntries(CATEGORY_ORDER.map((c) => [c, c]))
+    ),
     byStatus: countBy(tickets, (t) => t.status, STATUS_ORDER, STATUS_LABEL_PT),
     bySource: countBy(tickets, (t) => t.source, SOURCE_ORDER, SOURCE_LABEL_PT),
     byPriority: countBy(tickets, (t) => t.priority, PRIORITY_ORDER, PRIORITY_LABEL_PT),
@@ -495,13 +658,18 @@ export function computeKpiBreakdowns(
     ],
     byTechnician: buildTechnicianBreakdown(tickets, nowMs),
     dailyVolume: buildDailyVolume(tickets),
+    monthlyByCategory: buildMonthlyCategoryMatrix(tickets, period),
   };
 }
 
-export function computeKpiReport(tickets: KpiTicketInput[], nowMs = Date.now()): KpiReport {
+export function computeKpiReport(
+  tickets: KpiTicketInput[],
+  nowMs = Date.now(),
+  period?: KpiPeriodRange
+): KpiReport {
   return {
     summary: computeKpiSummary(tickets, nowMs),
-    breakdowns: computeKpiBreakdowns(tickets, nowMs),
+    breakdowns: computeKpiBreakdowns(tickets, nowMs, period),
     definitions: {
       sla: SLA_POLICY_HELP,
       mttr: MTTR_HELP,

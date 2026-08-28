@@ -16,6 +16,7 @@ import {
   canTriggerPendencyScan,
   roleDisplayLabel,
 } from '@/lib/permissions';
+import { categorySelectOptions } from '@/lib/ticket-categories';
 import { RoleBadge } from '@/components/permission-gates';
 import { KpiDashboard } from '@/components/kpi-dashboard';
 
@@ -1275,11 +1276,11 @@ export default function AdminDashboard() {
                             onChange={(e) => handleUpdateTicketMeta({ category: e.target.value })}
                             className="block w-full px-3 py-2 bg-slate-950 border border-white/5 rounded-xl text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
-                            <option value="Hardware">Hardware</option>
-                            <option value="Software">Software</option>
-                            <option value="Acessos">Acessos</option>
-                            <option value="Redes">Redes</option>
-                            <option value="Geral">Geral</option>
+                            {categorySelectOptions(selectedTicket.category).map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
                           </select>
                         </div>
 

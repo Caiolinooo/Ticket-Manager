@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { prisma } from '@/lib/db';
+import { normalizeReportCategory, SGI_CATEGORY_COLUMNS } from '@/lib/ticket-categories';
 
 export interface MessageAnalysis {
   isIssue: boolean;
@@ -159,7 +160,7 @@ function parseAnalysisJson(resultText: string, text: string, sourceLabel: string
   return {
     isIssue: !!parsed.isIssue,
     isContinuation: !!parsed.isContinuation,
-    category: parsed.category || 'Geral',
+    category: normalizeReportCategory(parsed.category || 'Geral'),
     priority: parsed.priority || 'MEDIUM',
     title: parsed.title || `Chamado Detectado via ${sourceLabel}`,
     summary: parsed.summary || text.substring(0, 150),
@@ -200,9 +201,21 @@ function smartMockAnalysis(text: string, ctx?: AnalyzeContext): MessageAnalysis 
   if (isDirectIssue && !isResolved) {
     isIssue = true;
     if (lowerText.includes('impressora') || lowerText.includes('teclado') || lowerText.includes('mouse') || lowerText.includes('notebook')) {
-      category = 'Hardware';
+      category = 'Atendimento Hardware';
       priority = lowerText.includes('impressora') ? 'MEDIUM' : 'LOW';
       title = lowerText.includes('impressora') ? 'Falha na Impressora do Setor' : 'Problema de Hardware Relatado';
+    } else if (lowerText.includes('wk radar') || lowerText.includes('wkradar')) {
+      category = 'Atendimento WK Radar';
+      priority = 'MEDIUM';
+      title = 'Atendimento WK Radar';
+    } else if (lowerText.includes('dominio') || lowerText.includes('domínio')) {
+      category = 'Atendimento Dominio';
+      priority = 'MEDIUM';
+      title = 'Atendimento Domínio';
+    } else if (lowerText.includes('facilities') || lowerText.includes('ar-condicionado') || lowerText.includes('predial')) {
+      category = 'Facilities';
+      priority = 'MEDIUM';
+      title = 'Chamado de Facilities';
     } else if (lowerText.includes('senha') || lowerText.includes('bloqueado') || lowerText.includes('acesso') || lowerText.includes('login') || lowerText.includes('sap')) {
       category = 'Acessos';
       priority = lowerText.includes('sap') || lowerText.includes('bloqueado') ? 'HIGH' : 'MEDIUM';
@@ -212,7 +225,7 @@ function smartMockAnalysis(text: string, ctx?: AnalyzeContext): MessageAnalysis 
       priority = 'HIGH';
       title = lowerText.includes('vpn') ? 'Erro de Acesso VPN Corporativa' : 'Instabilidade de Rede Relatada';
     } else {
-      category = 'Software';
+      category = 'Desenvolvimento Interno de Software';
       priority = 'LOW';
       title = 'Erro de Execução em Software';
     }
@@ -280,7 +293,7 @@ Responda ESTRITAMENTE em JSON puro (sem markdown):
 {
   "isIssue": boolean,
   "isContinuation": boolean,
-  "category": "Hardware" | "Software" | "Acessos" | "Redes" | "Geral",
+  "category": ${JSON.stringify([...SGI_CATEGORY_COLUMNS, 'Acessos', 'Redes', 'Geral'])} (escolha 1),
   "priority": "LOW" | "MEDIUM" | "HIGH" | "URGENT",
   "title": "título curto e profissional",
   "summary": "resumo técnico de 1 a 3 frases com base no contexto completo"
@@ -408,7 +421,7 @@ function smartMockDirectFix(title: string, description: string, category: string
     actions.push('Validar se a conta do usuário está bloqueada no diretório (AD) — a confirmar ferramenta usada no ambiente.');
     actions.push('Se houver menção a SAP no relato: verificar bloqueio/reset na transação indicada pelo cliente (a confirmar).');
     actions.push('Registrar senha temporária apenas se o procedimento padrão da empresa autorizar; comunicar ao usuário por canal seguro.');
-  } else if (lower.includes('impressora') || category === 'Hardware') {
+  } else if (lower.includes('impressora') || category === 'Hardware' || category === 'Atendimento Hardware') {
     actions.push('Confirmar status online da impressora citada no relato (ping/painel — a confirmar IP/nome).');
     actions.push('Verificar fila/spooler no posto do usuário e limpar trabalhos travados se aplicável.');
     actions.push('Orientar reinício físico do equipamento se o relato indicar atolamento ou luz de erro.');

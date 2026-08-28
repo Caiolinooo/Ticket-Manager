@@ -29,7 +29,7 @@ import {
   type KpiTicketInput,
 } from '@/lib/kpi-metrics';
 
-export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'custom';
+export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'year' | 'custom';
 
 export interface KpiDashboardTicket {
   id: string;
@@ -60,6 +60,7 @@ const PRESET_LABEL: Record<DatePreset, string> = {
   '7d': '7 dias',
   '30d': '30 dias',
   '90d': '90 dias',
+  year: 'Este ano',
   custom: 'Personalizado',
 };
 
@@ -96,6 +97,10 @@ function effectiveRange(
     case '90d': {
       const from = new Date(now);
       from.setDate(from.getDate() - 89);
+      return { from: isoDateLocal(from), to: todayStr };
+    }
+    case 'year': {
+      const from = new Date(now.getFullYear(), 0, 1);
       return { from: isoDateLocal(from), to: todayStr };
     }
     case 'custom':
@@ -245,7 +250,7 @@ export function KpiDashboard({
   );
 
   const report = useMemo(
-    () => computeKpiReport(periodTickets.map(toInput)),
+    () => computeKpiReport(periodTickets.map(toInput), Date.now(), range),
     [periodTickets]
   );
 
@@ -309,7 +314,7 @@ export function KpiDashboard({
           Período:
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {(['today', '7d', '30d', '90d', 'custom'] as DatePreset[]).map((preset) => (
+          {(['today', '7d', '30d', '90d', 'year', 'custom'] as DatePreset[]).map((preset) => (
             <button
               key={preset}
               type="button"
@@ -428,6 +433,71 @@ export function KpiDashboard({
         />
       </div>
 
+      {/* Indicadores SGI — mês × categoria */}
+      <div className="rounded-2xl overflow-hidden border border-[#1E3A5F]/80 shadow-lg shadow-slate-950/40">
+        <div className="bg-[#1E3A5F] px-5 py-3">
+          <h3 className="text-center text-sm font-bold text-white tracking-wide">
+            {breakdowns.monthlyByCategory.title}
+          </h3>
+          <p className="text-center text-[10px] text-blue-100/70 mt-0.5">
+            Quantidade de atendimentos por mês e categoria
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-[#1E3A5F] text-white">
+                <th className="px-3 py-2.5 text-left font-bold whitespace-nowrap border border-[#2c4d73]">
+                  Ref.
+                </th>
+                {breakdowns.monthlyByCategory.categories.map((cat) => (
+                  <th
+                    key={cat}
+                    className="px-3 py-2.5 text-center font-bold min-w-[7rem] border border-[#2c4d73]"
+                  >
+                    {cat}
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 text-center font-bold whitespace-nowrap border border-[#2c4d73]">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdowns.monthlyByCategory.months.length === 0 ? (
+                <tr>
+                  <td
+                    className="px-3 py-4 text-center text-slate-400 bg-slate-950"
+                    colSpan={breakdowns.monthlyByCategory.categories.length + 2}
+                  >
+                    Sem atendimentos no período selecionado
+                  </td>
+                </tr>
+              ) : (
+                breakdowns.monthlyByCategory.months.map((row) => (
+                  <tr key={row.key}>
+                    <td className="px-3 py-2.5 bg-[#1E3A5F] text-white font-bold whitespace-nowrap border border-[#2c4d73]">
+                      {row.label}
+                    </td>
+                    {breakdowns.monthlyByCategory.categories.map((cat) => (
+                      <td
+                        key={cat}
+                        className="px-3 py-2.5 text-center font-bold text-slate-900 bg-slate-200 border border-slate-300"
+                      >
+                        {row.counts[cat] ?? 0}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2.5 text-center font-extrabold text-slate-900 bg-slate-300 border border-slate-400">
+                      {row.total}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Categories pie */}
@@ -471,8 +541,9 @@ export function KpiDashboard({
             )}
           </div>
           <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/5 text-[10px] text-slate-400 font-semibold">
-            {breakdowns.byCategory.map((row, i) => (
-              <div key={row.key} className="flex items-center gap-1.5">
+            {breakdowns.byCategory.map((row, i) =>
+              row.count === 0 ? null : (
+              <div key={row.key} className="flex items-center gap-2">
                 <span
                   className="h-2 w-2 rounded-full shrink-0"
                   style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}

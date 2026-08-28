@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       messages: t.messages,
     }));
 
-    const report = computeKpiReport(asInput);
+    const report = computeKpiReport(asInput, Date.now(), { from: dateFrom, to: dateTo });
 
     let trend = null;
     if (dateFrom && dateTo) {

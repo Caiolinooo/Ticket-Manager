@@ -10,6 +10,22 @@ Atualizado: 2026-07-30
 
 ---
 
+## 10c. Relatório Indicadores SGI (mês × categoria)
+
+### Objetivo
+Separar quantidade de atendimentos por **mês** e **categoria**, no formato do quadro SGI (Ref. JUL-2026 nas linhas; categorias nas colunas).
+
+### Checklist
+- [x] Matriz em `src/lib/kpi-metrics.ts` (`buildMonthlyCategoryMatrix`)
+- [x] Categorias SGI + alias legado (Hardware → Atendimento Hardware, Software → Dev interno)
+- [x] UI Relatórios: tabela Indicadores – SGI + filtro "Este ano"
+- [x] Excel: aba `Indicadores SGI` + linhas no Resumo/KPIs
+- [x] Selects de categoria (admin/cliente) com opções SGI
+- [x] Smoke `scripts/smoke-monthly-category.mjs`
+- [x] Deploy no servidor Linux (`/home/caio/ticket-manager`; pasta `tikeckt` não existe)
+
+---
+
 ## 10. Relatórios & KPIs (SLA + MTTR) — concluído (código)
 
 ### Objetivo
